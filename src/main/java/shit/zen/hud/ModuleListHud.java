@@ -26,7 +26,7 @@ import shit.zen.event.EventTarget;
  * 每一项在模块开启/关闭时都有渐进淡入 / 渐退淡出的动画。
  */
 public class ModuleListHud
-extends HudElement {
+        extends HudElement {
 
     private static final class Entry {
         final Module module;
@@ -160,7 +160,7 @@ extends HudElement {
         });
         this.entries.forEach(Entry::tick);
 
-        // 真正使用可拖动坐标渲染（之前的版本这里写死了 4,4，导致拖了也不生效）
+        // 真正使用可拖动坐标渲染
         float baseX = this.getX();
         float baseY = this.getY();
 
@@ -169,13 +169,27 @@ extends HudElement {
         String titleText = "Zen (" + mc.getFps() + "FPS)";
         GlHelper.drawTextShadowLegacy(titleText, baseX, baseY, this.titleFont, titleColor);
 
-        float rowSpacing = (float) GlHelper.getFontAscent(this.entryFont) + 2.0f;
-        float offsetY = (float) GlHelper.getFontAscent(this.titleFont) + 4.0f;
+        // 🛠️ 修改点 1：如果你的 GlHelper 支持 getFontHeight()，直接用它。
+        // 如果没有这个方法，请查看底层 FontRenderer 的获取高度函数（通常是 getHeight() 或常量 9.0f-14.0f）。
+        // 这里提供了一个标准的安全 Fallback 机制：如果 Ascent 过小（比如小于 5），强行给一个与 16 磅字号匹配的固定基础行高（12像素）+ 4像素间距。
+        float fontHeight = (float) GlHelper.getFontAscent(this.entryFont);
+        if (fontHeight < 9.0f) {
+            fontHeight = 12.0f;
+        }
+        float rowSpacing = fontHeight + 4.0f; // 🛠️ 适当增加字与字之间的空白间距（从 2.0f 改为 4.0f）
+
+        float titleHeight = (float) GlHelper.getFontAscent(this.titleFont);
+        if (titleHeight < 9.0f) {
+            titleHeight = 12.0f;
+        }
+        float offsetY = titleHeight + 6.0f; // 🛠️ 标题和第一行模块名之间的间距调大，防止它们粘在一起
+
         float maxWidth = GlHelper.getStringWidth(titleText, this.titleFont);
 
         for (Entry entry : this.entries) {
             float alpha = entry.alphaAnim.getValueF();
             if (alpha <= 0.01f) {
+                // 即使淡出隐藏了，为了防止列表乱跳，这一行在没有彻底移除前依然占用一个间距
                 offsetY += rowSpacing;
                 continue;
             }
