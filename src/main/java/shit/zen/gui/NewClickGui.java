@@ -21,6 +21,8 @@ extends Screen {
     private boolean closing = false;
     @Getter
     private final SmoothAnimationTimer closeAnim = new SmoothAnimationTimer();
+    // 鼠标在方框区域外滚动时，整体上下平移的像素速度（每个滚动单位）
+    private static final float PAN_SPEED = 40.0f;
 
     public NewClickGui() {
         super(Component.literal("ClickGui"));
@@ -79,11 +81,21 @@ extends Screen {
     }
 
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollDelta) {
+        boolean handledByPanel = false;
         for (CategoryPanel categoryPanel : categoryPanels) {
-            if (!categoryPanel.mouseScrolled(mouseX, mouseY, scrollDelta)) continue;
+            if (categoryPanel.mouseScrolled(mouseX, mouseY, scrollDelta)) {
+                handledByPanel = true;
+            }
+        }
+        if (handledByPanel) {
             return true;
         }
-        return false;
+        // 鼠标不在任何方框范围内时，整体平移所有方框（上下滑动），点击/拖拽等操作不受影响
+        float panAmount = (float) scrollDelta * PAN_SPEED;
+        for (CategoryPanel categoryPanel : categoryPanels) {
+            categoryPanel.setY(categoryPanel.getY() + panAmount);
+        }
+        return true;
     }
 
     static {

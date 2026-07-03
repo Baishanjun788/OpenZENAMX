@@ -16,6 +16,9 @@ extends ClientBase {
     private long startTime = -1L;
     private boolean finished = false;
 
+    private static final String TITLE_TEXT = "ZENAMX";
+    private static final String SUBTITLE_TEXT = "Base on OpenZen";
+
     public IntroAnimation() {
         isActive = true;
     }
@@ -26,7 +29,6 @@ extends ClientBase {
 
     @EventTarget(value=4)
     public void onRender(GlRenderEvent glRenderEvent) {
-        float fadeFactor;
         float bgAlpha;
         long elapsed;
         if (this.finished) {
@@ -35,76 +37,89 @@ extends ClientBase {
         if (this.startTime < 0L) {
             this.startTime = System.currentTimeMillis();
         }
-        long dup = elapsed = System.currentTimeMillis() - this.startTime;
+        elapsed = System.currentTimeMillis() - this.startTime;
         float screenWidth = mc.getWindow().getGuiScaledWidth();
         float screenHeight = mc.getWindow().getGuiScaledHeight();
         float centerX = screenWidth / 2.0f;
         float centerY = screenHeight / 2.0f;
-        long zAppearStart = 1100L;
-        long fadeOutStart = zAppearStart + 900L + 700L + 500L + 300L + 500L + 1300L;
+
+        // 时间轴：主标题(ZENAMX) 缩放淡入 -> 延迟一小段 -> 副标题(Base on OpenZen) 淡入上滑 -> 停留 -> 整体淡出
+        long titleAppearStart = 1100L;
+        long titleAppearDuration = 900L;
+        long subtitleDelay = 400L;
+        long subtitleAppearDuration = 500L;
+        long holdDuration = 1500L;
+        long fadeOutDuration = 700L;
+
+        long subtitleAppearStart = titleAppearStart + titleAppearDuration + subtitleDelay;
+        long fadeOutStart = subtitleAppearStart + subtitleAppearDuration + holdDuration;
+
         if (elapsed <= 800L) {
             float fadeIn = IntroAnimation.easeOutCubic(IntroAnimation.clamp01((float)elapsed / 800.0f));
             bgAlpha = 0.6f * fadeIn;
         } else if (elapsed <= fadeOutStart) {
             bgAlpha = 0.6f;
-        } else if (elapsed <= fadeOutStart + 700L) {
-            float fadeOut = 1.0f - IntroAnimation.easeInCubic(IntroAnimation.clamp01((float)(elapsed - fadeOutStart) / 700.0f));
+        } else if (elapsed <= fadeOutStart + fadeOutDuration) {
+            float fadeOut = 1.0f - IntroAnimation.easeInCubic(IntroAnimation.clamp01((float)(elapsed - fadeOutStart) / (float) fadeOutDuration));
             bgAlpha = 0.6f * fadeOut;
         } else {
             this.finish();
             return;
         }
+
         Paint paint = GlHelper.toPaint(new Color(0, 0, 0, (int)(bgAlpha * 255.0f)));
         GlHelper.drawRect(0.0f, 0.0f, screenWidth, screenHeight, paint);
-        float zScale = 1.0f;
-        float zAlpha = 0.0f;
-        if (elapsed >= zAppearStart) {
-            long sinceZ = elapsed - zAppearStart;
-            if (sinceZ <= 900L) {
-                float zProgress = IntroAnimation.easeOutCubic(IntroAnimation.clamp01((float)sinceZ / 900.0f));
-                zScale = IntroAnimation.lerp(2.0f, 1.0f, zProgress);
-                zAlpha = zProgress;
+
+        // 整体淡出系数，最后 fadeOutDuration 内让标题和副标题一起消失
+        float fadeFactor = 1.0f;
+        if (elapsed > fadeOutStart) {
+            fadeFactor = 1.0f - IntroAnimation.clamp01((float)(elapsed - fadeOutStart) / (float) fadeOutDuration);
+        }
+
+        // 主标题：ZENAMX，缩放 2.0 -> 1.0，同时淡入
+        float titleScale = 2.0f;
+        float titleAlpha = 0.0f;
+        if (elapsed >= titleAppearStart) {
+            long sinceTitle = elapsed - titleAppearStart;
+            if (sinceTitle <= titleAppearDuration) {
+                float titleProgress = IntroAnimation.easeOutCubic(IntroAnimation.clamp01((float)sinceTitle / (float) titleAppearDuration));
+                titleScale = IntroAnimation.lerp(2.0f, 1.0f, titleProgress);
+                titleAlpha = titleProgress;
             } else {
-                zScale = 1.0f;
-                zAlpha = 1.0f;
+                titleScale = 1.0f;
+                titleAlpha = 1.0f;
             }
         }
-        float slideProgress = 0.0f;
-        long slideStart = zAppearStart + 900L + 700L;
-        if (elapsed > slideStart && elapsed <= slideStart + 500L) {
-            slideProgress = IntroAnimation.easeOutCubic((float)(elapsed - slideStart) / 500.0f);
-        } else if (elapsed > slideStart + 500L) {
-            slideProgress = 1.0f;
+
+        FontRenderer titleFont = FontPresets.axiformaBold(64.0f * titleScale);
+        float titleWidth = GlHelper.getStringWidth(TITLE_TEXT, titleFont);
+        float titleRenderX = centerX - titleWidth / 2.0f;
+        float titleRenderY = centerY - titleFont.getMetrics().capHeight() / 2.0f;
+        int titleColor = new Color(1.0f, 1.0f, 1.0f, IntroAnimation.clamp01(titleAlpha * fadeFactor)).getRGB();
+        GlHelper.drawText(TITLE_TEXT, titleRenderX, titleRenderY, titleFont, titleColor);
+
+        // 副标题：Base on OpenZen，淡入 + 轻微上滑，位置在主标题正下方
+        float subtitleAlpha = 0.0f;
+        float subtitleOffsetY = 8.0f;
+        if (elapsed > subtitleAppearStart && elapsed <= subtitleAppearStart + subtitleAppearDuration) {
+            float subtitleProgress = IntroAnimation.easeOutCubic((float)(elapsed - subtitleAppearStart) / (float) subtitleAppearDuration);
+            subtitleAlpha = subtitleProgress;
+            subtitleOffsetY = (1.0f - subtitleProgress) * 8.0f;
+        } else if (elapsed > subtitleAppearStart + subtitleAppearDuration) {
+            subtitleAlpha = 1.0f;
+            subtitleOffsetY = 0.0f;
         }
-        FontRenderer scaledZFont = FontPresets.axiformaBold(64.0f * zScale);
-        FontRenderer baseFont = FontPresets.axiformaBold(64.0f);
-        float zWidth = GlHelper.getStringWidth("Z", scaledZFont);
-        float enWidth = GlHelper.getStringWidth("EN", baseFont);
-        float zCenterX = centerX - zWidth / 2.0f;
-        float zSlideX = centerX - (zWidth + 0.0f + enWidth) / 2.0f;
-        float zRenderX = IntroAnimation.lerp(zCenterX, zSlideX, slideProgress);
-        float zRenderY = centerY - scaledZFont.getMetrics().capHeight() / 2.0f;
-        float enAlpha = 0.0f;
-        float enOffsetY = 12.0f;
-        long enStart = slideStart + 500L + 300L;
-        if (elapsed > enStart && elapsed <= enStart + 500L) {
-            enAlpha = fadeFactor = IntroAnimation.easeOutCubic((float)(elapsed - enStart) / 500.0f);
-            enOffsetY = (1.0f - fadeFactor) * 12.0f;
-        } else if (elapsed > enStart + 500L) {
-            enAlpha = 1.0f;
-            enOffsetY = 0.0f;
-        }
-        fadeFactor = 1.0f;
-        if (elapsed > fadeOutStart) {
-            fadeFactor = 1.0f - IntroAnimation.clamp01((float)(elapsed - fadeOutStart) / 700.0f);
-        }
-        int zColor = new Color(1.0f, 1.0f, 1.0f, IntroAnimation.clamp01(zAlpha * fadeFactor)).getRGB();
-        GlHelper.drawText("Z", zRenderX, zRenderY, scaledZFont, zColor);
-        if (enAlpha > 0.0f) {
-            float enX = zRenderX + zWidth + 0.0f;
-            float enY = centerY - baseFont.getMetrics().capHeight() / 2.0f + enOffsetY;
-            int enColor = new Color(1.0f, 1.0f, 1.0f, IntroAnimation.clamp01(enAlpha * fadeFactor)).getRGB();
-            GlHelper.drawText("EN", enX, enY, baseFont, enColor);
+
+        if (subtitleAlpha > 0.0f) {
+            FontRenderer subtitleFont = FontPresets.axiformaBold(16.0f);
+            float subtitleWidth = GlHelper.getStringWidth(SUBTITLE_TEXT, subtitleFont);
+            float subtitleRenderX = centerX - subtitleWidth / 2.0f;
+            // 固定用 1.0 倍字号下的标题基准位置计算行距，避免标题缩放期间副标题跟着跳动
+            FontRenderer baseTitleFont = FontPresets.axiformaBold(64.0f);
+            float baseTitleY = centerY - baseTitleFont.getMetrics().capHeight() / 2.0f;
+            float subtitleRenderY = baseTitleY + baseTitleFont.getMetrics().capHeight() + 10.0f + subtitleOffsetY;
+            int subtitleColor = new Color(1.0f, 1.0f, 1.0f, IntroAnimation.clamp01(subtitleAlpha * fadeFactor * 0.75f)).getRGB();
+            GlHelper.drawText(SUBTITLE_TEXT, subtitleRenderX, subtitleRenderY, subtitleFont, subtitleColor);
         }
     }
 

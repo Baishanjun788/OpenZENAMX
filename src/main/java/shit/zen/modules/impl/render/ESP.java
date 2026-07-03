@@ -167,7 +167,7 @@ public class ESP extends Module {
             Vector4d v = entry.getValue().first;
             if (v.z <= 0.0 || v.w <= 0.0) continue;
             Entity entity = entry.getKey();
-            Color color = entity instanceof Player p ? ColorUtil.getPlayerColor(p) : Color.WHITE;
+            Color color = entity instanceof Player p ? this.getEspColor(p) : Color.WHITE;
             float x1 = (float) v.x();
             float y1 = (float) v.y();
             float x2 = x1 + (float) v.z();
@@ -179,6 +179,19 @@ public class ESP extends Module {
         }
         BufferUploader.drawWithShader(builder.end());
         RenderSystem.disableBlend();
+    }
+
+    /**
+     * 计算某个玩家在 ESP 中应显示的颜色。
+     * 如果该玩家被 SwordNotifier 标记（曾持钻石剑）且开启了 Red ESP，则强制显示为红色。
+     */
+    private Color getEspColor(Player player) {
+        SwordNotifier swordNotifier = SwordNotifier.INSTANCE;
+        if (swordNotifier != null && swordNotifier.isEnabled() && swordNotifier.redEsp.getValue()
+                && swordNotifier.isMarked(player.getUUID())) {
+            return Color.RED;
+        }
+        return ColorUtil.getPlayerColor(player);
     }
 
     private void drawFilledRect2D(BufferBuilder builder, Matrix4f matrix4f, float x1, float y1, float x2, float y2, Color color) {

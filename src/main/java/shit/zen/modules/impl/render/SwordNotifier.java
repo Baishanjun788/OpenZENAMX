@@ -6,9 +6,11 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Items;
 import shit.zen.event.EventTarget;
 import shit.zen.event.impl.PacketEvent;
+import shit.zen.event.impl.Render2DEvent;
 import shit.zen.event.impl.TickEvent;
 import shit.zen.modules.Category;
 import shit.zen.modules.Module;
+import shit.zen.render.FontStore;
 import shit.zen.settings.impl.BooleanSetting;
 
 import java.util.HashSet;
@@ -17,8 +19,14 @@ import java.util.UUID;
 
 public class SwordNotifier extends Module {
 
+    public static SwordNotifier INSTANCE;
+
     public final BooleanSetting glow = new BooleanSetting("Glow Target", true);
     public final BooleanSetting chatAlert = new BooleanSetting("Chat Alert", true);
+    // 与 ESP 联动：被标记的玩家在 ESP 里强制显示为红色
+    public final BooleanSetting redEsp = new BooleanSetting("Red ESP", true);
+    // 在屏幕中间下方显示最近的被标记玩家的距离
+    public final BooleanSetting distanceText = new BooleanSetting("Distance Text", true);
 
     // 核心改变：改为存储玩家的 UUID。即使玩家切走武器或短暂消失，只要没触发新对局，就永远在黑名单里
     private final Set<UUID> markedPlayers = new HashSet<>();
@@ -27,6 +35,14 @@ public class SwordNotifier extends Module {
 
     public SwordNotifier() {
         super("SwordNotifier", Category.MISC);
+        INSTANCE = this;
+    }
+
+    /**
+     * 供其他模块（如 ESP）查询某个玩家是否被标记。
+     */
+    public boolean isMarked(UUID uuid) {
+        return this.markedPlayers.contains(uuid);
     }
 
     @Override
@@ -117,5 +133,34 @@ public class SwordNotifier extends Module {
                 player.setGlowingTag(false);
             }
         }
+    }
+
+    /**
+     * 在屏幕中间下方绘制一行文字：最近的被标记玩家离自己的距离。
+     */
+    @EventTarget
+    public void onRender2D(Render2DEvent event) {
+        if (!this.distanceText.getValue()) return;
+        if (mc.player == null || mc.level == null) return;
+
+        double nearestDistance = -1;
+        for (Player player : mc.level.players()) {
+            if (player == mc.player) continue;
+            if (!this.markedPlayers.contains(player.getUUID())) continue;
+
+            double distance = mc.player.distanceTo(player);
+            if (nearestDistance < 0 || distance < nearestDistance) {
+                nearestDistance = distance;
+            }
+        }
+
+        if (nearestDistance < 0) return;
+
+        String text = String.format("最近的拿钻石剑的人离你 %.1f 格", nearestDistance);
+        int screenWidth = mc.getWindow().getGuiScaledWidth();
+        int screenHeight = mc.getWindow().getGuiScaledHeight();
+        float x = screenWidth / 2.0f;
+        float y = screenHeight - 40.0f;
+        FontStore.PINGFANG_18.drawStringCenteredColor(event.poseStack(), text, x, y, new java.awt.Color(255, 60, 60));
     }
 }

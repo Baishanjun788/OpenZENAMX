@@ -14,6 +14,8 @@ public class OldClickGui
 extends Screen {
     private final List<CategoryPanel> categoryPanels = new ArrayList<>();
     private static final String TITLE = "Click GUI";
+    // 鼠标在方框区域外滚动时，整体上下平移的像素速度（每个滚动单位）
+    private static final int PAN_SPEED = 24;
 
     public OldClickGui() {
         super(Component.nullToEmpty(TITLE));
@@ -56,8 +58,19 @@ extends Screen {
     }
 
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollDelta) {
+        boolean overAnyPanel = false;
         for (CategoryPanel categoryPanel : this.categoryPanels) {
-            categoryPanel.mouseScrolled(mouseX, mouseY, scrollDelta);
+            if (categoryPanel.isMouseOverPanel(mouseX, mouseY)) {
+                overAnyPanel = true;
+                categoryPanel.mouseScrolled(mouseX, mouseY, scrollDelta);
+            }
+        }
+        if (!overAnyPanel) {
+            // 鼠标不在任何方框范围内时，整体平移所有方框（上下滑动）
+            int panAmount = (int) Math.round(scrollDelta * (double) PAN_SPEED);
+            for (CategoryPanel categoryPanel : this.categoryPanels) {
+                categoryPanel.y += panAmount;
+            }
         }
         return true;
     }

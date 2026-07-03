@@ -137,6 +137,19 @@ public class CategoryPanel {
         return mouseX > (double)this.x && mouseX < (double)(this.x + this.width) && mouseY > (double)this.y && mouseY < (double)(this.y + this.rowHeight);
     }
 
+    /**
+     * 判断鼠标是否处于该分类方框的完整区域内（包含标题栏 + 已展开的模块/设置内容）。
+     * 用于区分"在方框内滚动"（滚动方框自身内容）和"在方框外滚动"（整体平移所有方框）。
+     */
+    public boolean isMouseOverPanel(double mouseX, double mouseY) {
+        int totalHeight = this.rowHeight;
+        if (!this.moduleButtons.isEmpty()) {
+            ModuleButton lastButton = this.moduleButtons.get(this.moduleButtons.size() - 1);
+            totalHeight = Math.max(totalHeight, lastButton.yOffset + lastButton.getTotalHeight());
+        }
+        return mouseX >= (double)this.x && mouseX <= (double)(this.x + this.width) && mouseY >= (double)this.y && mouseY <= (double)(this.y + totalHeight);
+    }
+
     public void mouseDragged(double mouseX, double mouseY) {
         if (this.dragging) {
             this.x = (int)(mouseX - (double)this.dragOffsetX);
