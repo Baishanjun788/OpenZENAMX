@@ -176,7 +176,7 @@ public class ModuleListHud
         if (fontHeight < 9.0f) {
             fontHeight = 12.0f;
         }
-        float rowSpacing = fontHeight + 0.6f; // 🛠️ 适当增加字与字之间的空白间距（从 2.0f 改为 4.0f）
+        float rowSpacing = fontHeight + 0.4f; // 🛠️ 适当增加字与字之间的空白间距（从 2.0f 改为 4.0f）
 
         float titleHeight = (float) GlHelper.getFontAscent(this.titleFont);
         if (titleHeight < 9.0f) {

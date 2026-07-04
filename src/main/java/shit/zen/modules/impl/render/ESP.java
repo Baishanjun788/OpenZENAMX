@@ -188,7 +188,7 @@ public class ESP extends Module {
     private Color getEspColor(Player player) {
         SwordNotifier swordNotifier = SwordNotifier.INSTANCE;
         if (swordNotifier != null && swordNotifier.isEnabled() && swordNotifier.redEsp.getValue()
-                && swordNotifier.isMarked(player.getUUID())) {
+                && swordNotifier.isMarked(player.getGameProfile().getName())) {
             return Color.RED;
         }
         return ColorUtil.getPlayerColor(player);
