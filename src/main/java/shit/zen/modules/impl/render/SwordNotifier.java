@@ -16,7 +16,6 @@ import shit.zen.modules.Category;
 import shit.zen.modules.Module;
 import shit.zen.render.FontStore;
 import shit.zen.settings.impl.BooleanSetting;
-import shit.zen.utils.misc.ChatUtil;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -69,19 +68,28 @@ public class SwordNotifier extends Module {
         this.alertedPlayerNames.clear();
     }
 
+    /**
+     * 🛠️ 彻底放弃外部工具类，调用原版最底层的玩家聊天发包
+     */
+    private void sendNativeChatMessage(String text) {
+        if (mc.player == null || text.isEmpty()) return;
+        // 原版自带的本地过滤与上报抽象，安全绕过混淆直接发送真实聊天包
+        mc.player.connection.sendChat(text);
+    }
+
     private void sendNextMessage(String name) {
         if (!this.sendToPublicChat.getValue()) return;
 
         String msg = "";
         switch (this.textIndex) {
-            case 0 -> msg = "我看到了，" + name + "拿了钻石剑。";
-            case 1 -> msg = name + "拿了钻石剑。";
-            case 2 -> msg = "这个" + name + "拿了钻石剑。";
+            case 0 -> msg = "我看到了，" + name + "是杀手。";
+            case 1 -> msg = name + "是杀手。";
+            case 2 -> msg = "这个" + name + "是杀手!";
         }
 
         this.textIndex = (this.textIndex + 1) % 3;
         this.pendingMessage = msg;
-        ChatUtil.print(msg);
+        this.sendNativeChatMessage(msg);
     }
 
     @EventTarget
@@ -128,7 +136,6 @@ public class SwordNotifier extends Module {
         }
 
         if (!chatMessage.isEmpty()) {
-            // 防刷屏秒数提取
             if (chatMessage.contains("请不要刷屏或者发送重复消息哦")) {
                 Pattern pattern = Pattern.compile("\\((\\d+)\\s*秒\\)");
                 Matcher matcher = pattern.matcher(chatMessage);
@@ -142,11 +149,8 @@ public class SwordNotifier extends Module {
                 }
             }
 
-            // 🛠️ 核心修复点：新对局触发时，强制切断拦截重发任务
             if (chatMessage.contains("匹配") || chatMessage.contains("游戏开始") || chatMessage.contains("START")) {
                 this.clearMarkers();
-
-                // 🔥 关键：在这里清空挂起的缓存消息和计时器，直接掐断跨局发送
                 this.pendingMessage = "";
                 this.retryTime = 0;
 
@@ -179,18 +183,18 @@ public class SwordNotifier extends Module {
             }
         }
 
-        // 自动冷却重发机制（添加了非空校验，更安全）
+        // 自动冷却重发原版包
         if (this.sendToPublicChat.getValue() && !this.pendingMessage.isEmpty() && this.retryTime > 0) {
             if (System.currentTimeMillis() >= this.retryTime) {
-                ChatUtil.print(this.pendingMessage);
-                this.retryTime = 0; // 发送后重置
-                this.pendingMessage = ""; // 发送后清除，防止重复
+                this.sendNativeChatMessage(this.pendingMessage);
+                this.retryTime = 0;
+                this.pendingMessage = "";
             }
         }
 
         if (nearestDistance < 0) return;
 
-        // 全屏边缘红光高频闪烁
+        // 🛠️ 核心修改：只闪四周 2/5 面积，且边缘向内实现平滑渐变
         if (this.screenFlash.getValue() && nearestDistance <= 30.0) {
             int sw = mc.getWindow().getGuiScaledWidth();
             int sh = mc.getWindow().getGuiScaledHeight();
@@ -204,24 +208,44 @@ public class SwordNotifier extends Module {
             if (alphaAlpha > 0.01f) {
                 com.mojang.blaze3d.systems.RenderSystem.enableBlend();
                 com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
-                // 🛠️ 放弃不兼容的 GuiComponent，改用高版本统一的底层 BufferBuilder 填色，免疫所有高版本重构
+
                 com.mojang.blaze3d.vertex.Tesselator tesselator = com.mojang.blaze3d.vertex.Tesselator.getInstance();
                 com.mojang.blaze3d.vertex.BufferBuilder bufferbuilder = tesselator.getBuilder();
                 com.mojang.blaze3d.systems.RenderSystem.setShader(net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
 
-                int colorRGB = new java.awt.Color(255, 0, 0, (int)(alphaAlpha * 255)).getRGB();
-                float f3 = (float)(colorRGB >> 24 & 255) / 255.0F;
-                float f = (float)(colorRGB >> 16 & 255) / 255.0F;
-                float f1 = (float)(colorRGB >> 8 & 255) / 255.0F;
-                float f2 = (float)(colorRGB & 255) / 255.0F;
-
+                int maxAlphaInt = (int)(alphaAlpha * 255);
                 org.joml.Matrix4f matrix = event.poseStack().last().pose();
 
+                // 📐 计算 2/5 (40%) 边缘界限
+                float borderX = sw * 0.4f;
+                float borderY = sh * 0.4f;
+
                 bufferbuilder.begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.QUADS, com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
-                bufferbuilder.vertex(matrix, 0.0F, (float)sh, 0.0F).color(f, f1, f2, f3).endVertex();
-                bufferbuilder.vertex(matrix, (float)sw, (float)sh, 0.0F).color(f, f1, f2, f3).endVertex();
-                bufferbuilder.vertex(matrix, (float)sw, 0.0F, 0.0F).color(f, f1, f2, f3).endVertex();
-                bufferbuilder.vertex(matrix, 0.0F, 0.0F, 0.0F).color(f, f1, f2, f3).endVertex();
+
+                // 1. 顶部边缘渐变 (上边缘向下过渡 2/5)
+                bufferbuilder.vertex(matrix, 0.0F, borderY, 0.0F).color(255, 0, 0, 0).endVertex();
+                bufferbuilder.vertex(matrix, (float)sw, borderY, 0.0F).color(255, 0, 0, 0).endVertex();
+                bufferbuilder.vertex(matrix, (float)sw, 0.0F, 0.0F).color(255, 0, 0, maxAlphaInt).endVertex();
+                bufferbuilder.vertex(matrix, 0.0F, 0.0F, 0.0F).color(255, 0, 0, maxAlphaInt).endVertex();
+
+                // 2. 底部边缘渐变 (下边缘向上过渡 2/5)
+                bufferbuilder.vertex(matrix, 0.0F, (float)sh, 0.0F).color(255, 0, 0, maxAlphaInt).endVertex();
+                bufferbuilder.vertex(matrix, (float)sw, (float)sh, 0.0F).color(255, 0, 0, maxAlphaInt).endVertex();
+                bufferbuilder.vertex(matrix, (float)sw, (float)sh - borderY, 0.0F).color(255, 0, 0, 0).endVertex();
+                bufferbuilder.vertex(matrix, 0.0F, (float)sh - borderY, 0.0F).color(255, 0, 0, 0).endVertex();
+
+                // 3. 左侧边缘渐变 (左边缘向右过渡 2/5)
+                bufferbuilder.vertex(matrix, 0.0F, (float)sh, 0.0F).color(255, 0, 0, maxAlphaInt).endVertex();
+                bufferbuilder.vertex(matrix, borderX, (float)sh, 0.0F).color(255, 0, 0, 0).endVertex();
+                bufferbuilder.vertex(matrix, borderX, 0.0F, 0.0F).color(255, 0, 0, 0).endVertex();
+                bufferbuilder.vertex(matrix, 0.0F, 0.0F, 0.0F).color(255, 0, 0, maxAlphaInt).endVertex();
+
+                // 4. 右侧边缘渐变 (右边缘向左过渡 2/5)
+                bufferbuilder.vertex(matrix, (float)sw - borderX, (float)sh, 0.0F).color(255, 0, 0, 0).endVertex();
+                bufferbuilder.vertex(matrix, (float)sw, (float)sh, 0.0F).color(255, 0, 0, maxAlphaInt).endVertex();
+                bufferbuilder.vertex(matrix, (float)sw, 0.0F, 0.0F).color(255, 0, 0, maxAlphaInt).endVertex();
+                bufferbuilder.vertex(matrix, (float)sw - borderX, 0.0F, 0.0F).color(255, 0, 0, 0).endVertex();
+
                 tesselator.end();
             }
         }
