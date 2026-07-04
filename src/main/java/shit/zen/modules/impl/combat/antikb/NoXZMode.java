@@ -22,6 +22,8 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.projectile.Arrow;
+import net.minecraft.world.entity.projectile.ThrownEnderpearl;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
@@ -44,8 +46,8 @@ import shit.zen.modules.impl.combat.antikb.AntiKBMode;
 import shit.zen.modules.impl.player.Stuck;
 import shit.zen.utils.misc.ChatUtil;
 
-public class NoXZMode
-extends AntiKBMode {
+@SuppressWarnings("unchecked")
+public class NoXZMode extends AntiKBMode {
     public static NoXZMode INSTANCE;
     public static boolean isAttacking;
     public static int attackCount;
@@ -59,8 +61,8 @@ extends AntiKBMode {
     private boolean isSuspending = false;
     private int suspendTicks = 0;
     private ClientboundSetEntityMotionPacket knockbackPacket = null;
-    private final LinkedBlockingDeque<Packet<?>> packetQueue = new LinkedBlockingDeque();
-    private final LinkedBlockingDeque<Packet<?>> movePacketQueue = new LinkedBlockingDeque();
+    private final LinkedBlockingDeque<Packet<?>> packetQueue = new LinkedBlockingDeque<>();
+    private final LinkedBlockingDeque<Packet<?>> movePacketQueue = new LinkedBlockingDeque<>();
     private volatile boolean isFlushing = false;
     private float instantAttackProgress = 0.0f;
     private boolean isInstantAttacking = false;
@@ -99,10 +101,11 @@ extends AntiKBMode {
     public void onMotion(MotionEvent motionEvent) {
         if (motionEvent.isPre() && this.shouldFlushMotion) {
             while (!this.packetQueue.isEmpty()) {
-                Packet packet = this.packetQueue.poll();
+                Packet<?> packet = this.packetQueue.poll();
                 if (packet == null) continue;
                 try {
-                    packet.handle(mc.getConnection());
+                    // 强转为精确的泛型，修复 'capture of ?' 编译报错
+                    ((Packet<ClientGamePacketListener>) packet).handle(mc.getConnection());
                 } catch (Exception exception) {
                     exception.printStackTrace();
                 }
@@ -113,7 +116,7 @@ extends AntiKBMode {
 
     @Override
     public void onReceivePacket(ReceivePacketEvent receivePacketEvent) {
-        if (mc.player == null) {
+        if (mc.player == null || mc.level == null) {
             return;
         }
         if (this.isFlushing) {
@@ -150,25 +153,50 @@ extends AntiKBMode {
             if (motionPacket.getId() != mc.player.getId()) {
                 return;
             }
+
+            // ==================== 核心过滤：检测珍珠、弓箭、摔落伤害与无效目标 ====================
+
+            // 1. 摔落伤害检测
+            if (mc.player.fallDistance > 1.5f && !mc.player.onGround()) {
+                return;
+            }
+
+            // 2. 珍珠与弹射物(弓箭)碰撞检测：扫描玩家周围 2.5 格范围内是否存在珍珠或箭矢实体
+            AABB detectionBox = mc.player.getBoundingBox().inflate(2.5);
+            boolean projectileNearby = mc.level.getEntitiesOfClass(Entity.class, detectionBox,
+                    entity -> entity instanceof ThrownEnderpearl || entity instanceof Arrow
+            ).size() > 0;
+
+            if (projectileNearby) {
+                ChatUtil.print("Bypassed: Projectile/Pearl Damage Detected");
+                return;
+            }
+
+            // 3. 校验对刀目标合法性：如果当前根本没有有效的交战目标，直接放行不触发拦截
+            Entity currentTarget = this.getAttackTarget();
+            if (!this.isValidTarget(currentTarget)) {
+                return;
+            }
+            // ==================================================================================
+
             double dx = -motionPacket.getXa();
             double dz = -motionPacket.getZa();
             if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01) {
                 this.hitCounter = 1;
             }
             if (motionPacket.getYa() > 0) {
-                Entity target;
                 this.sprintBoostCounter = this.sprintBoostCounter % 100 + 100;
                 if (this.sprintBoostCounter >= 100) {
                     this.shouldJump = true;
                 }
-                boolean canAttack = this.isValidTarget(target = this.getAttackTarget()) && mc.player.isSprinting();
+                boolean sprinting = mc.player.isSprinting();
                 if (!mc.player.onGround()) {
                     this.isSuspending = true;
                     this.suspendTicks = 0;
                     this.knockbackPacket = motionPacket;
                     receivePacketEvent.setCancelled(true);
-                } else if (canAttack) {
-                    this.attackTarget = target;
+                } else if (sprinting) {
+                    this.attackTarget = currentTarget;
                     this.attacksRemaining = AntiKB.INSTANCE.attackAmount.getValue().intValue();
                 } else {
                     this.isSuspending = true;
@@ -451,7 +479,7 @@ extends AntiKBMode {
             return;
         }
         while (!this.movePacketQueue.isEmpty()) {
-            Packet packet = this.movePacketQueue.poll();
+            Packet<?> packet = this.movePacketQueue.poll();
             if (packet == null) continue;
             try {
                 mc.getConnection().send(packet);
@@ -464,7 +492,8 @@ extends AntiKBMode {
     private void applyKnockbackPacket() {
         if (this.knockbackPacket != null && mc.getConnection() != null) {
             try {
-                this.knockbackPacket.handle(mc.getConnection());
+                // 强转为精确的泛型，修复 'capture of ?' 编译报错
+                ((Packet<ClientGamePacketListener>) this.knockbackPacket).handle(mc.getConnection());
             } catch (Exception exception) {
                 exception.printStackTrace();
             }
