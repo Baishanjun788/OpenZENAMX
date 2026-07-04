@@ -6,7 +6,6 @@ import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.animal.Squid;
 import net.minecraft.world.entity.player.Player;
 import shit.zen.event.EventTarget;
-import shit.zen.event.impl.EntityHurtEvent;
 import shit.zen.event.impl.TickEvent;
 import shit.zen.hud.TargetHud;
 import shit.zen.modules.Category;
@@ -25,26 +24,14 @@ public class KillEffect extends Module {
         SquidEffect(Squid squid) { this.squid = squid; }
     }
 
-    // 手动攻击的记录（兜底）
-    private final Map<UUID, LivingEntity> damagedByMe = new HashMap<>();
-    // 当前正在上升的鱿鱼
     private final List<SquidEffect> activeSquids = new ArrayList<>();
-    // 已经触发过特效的实体UUID，防止重复
-    private final Set<UUID> triggered = new HashSet<>();
+    private final Set<UUID> triggeredUUIDs = new HashSet<>();
+
+    // 缓存攻击过的实体的最后坐标（UUID -> 坐标），用于 isRemoved 时仍然能生成鱿鱼
+    private final Map<UUID, double[]> lastPositionMap = new HashMap<>();
 
     public KillEffect() {
         super("KillEffect", Category.RENDER);
-    }
-
-    @EventTarget
-    public void onEntityHurt(EntityHurtEvent event) {
-        if (mc.player == null) return;
-        LivingEntity target = event.entity();
-        if (target == mc.player) return;
-        if (event.damageSource().getEntity() != mc.player) return;
-
-        // 只是存起来，让 tick 统一判断
-        damagedByMe.put(target.getUUID(), target);
     }
 
     @EventTarget
@@ -54,23 +41,52 @@ public class KillEffect extends Module {
             return;
         }
 
-        // ---- 1. 处理手动攻击记录的实体 ----
-        Iterator<Map.Entry<UUID, LivingEntity>> iter = damagedByMe.entrySet().iterator();
-        while (iter.hasNext()) {
-            LivingEntity entity = iter.next().getValue();
-            if (checkAndTrigger(entity)) {
-                iter.remove();
-            } else if (entity.isRemoved()) {
-                iter.remove(); // 防止内存泄漏
+        // 1. 检查 KillAura 当前目标
+        if (KillAura.aimingTarget instanceof LivingEntity target) {
+            UUID uuid = target.getUUID();
+
+            // 缓存当前坐标（只要还在攻击就会不断更新）
+            lastPositionMap.put(uuid, new double[]{target.getX(), target.getY(), target.getZ()});
+
+            if (!triggeredUUIDs.contains(uuid)) {
+                boolean dead = false;
+
+                if (target instanceof Player player) {
+                    // ① 计分板真实血量（服务器数据，最优先）
+                    String name = player.getName().getString();
+                    if (TargetHud.playerHealthMap.containsKey(name)) {
+                        int score = TargetHud.playerHealthMap.get(name).get();
+                        if (score <= 0) dead = true;
+                    }
+                    // ② 原版死亡动画/血量归零
+                    if (!dead && (player.isDeadOrDying() || player.getHealth() <= 0.0f)) {
+                        dead = true;
+                    }
+                    // ③ 实体被移除（死亡或离线后客户端移除），此时需要用到缓存的坐标
+                    if (!dead && player.isRemoved()) {
+                        dead = true;
+                    }
+                } else {
+                    // 动物/怪物：同样多级判断
+                    if (target.isDeadOrDying() || target.getHealth() <= 0.0f) {
+                        dead = true;
+                    }
+                    if (!dead && target.isRemoved()) {
+                        dead = true;
+                    }
+                }
+
+                if (dead) {
+                    // 优先用缓存的坐标（防止实体已移除导致 getX() 错误）
+                    double[] pos = lastPositionMap.getOrDefault(uuid,
+                            new double[]{target.getX(), target.getY(), target.getZ()});
+                    spawnSquid(pos[0], pos[1] + 1.0, pos[2]);
+                    triggeredUUIDs.add(uuid);
+                }
             }
         }
 
-        // ---- 2. 处理 KillAura 当前目标（主要针对玩家） ----
-        if (KillAura.aimingTarget instanceof LivingEntity target) {
-            checkAndTrigger(target);
-        }
-
-        // ---- 3. 驱动鱿鱼上升 ----
+        // 2. 驱动鱿鱼上升 + 爆炸（逻辑不变）
         Iterator<SquidEffect> squidIter = activeSquids.iterator();
         while (squidIter.hasNext()) {
             SquidEffect effect = squidIter.next();
@@ -83,7 +99,6 @@ public class KillEffect extends Module {
 
             effect.percent += PERCENT_STEP;
             if (effect.percent >= 1.0) {
-                // 爆炸特效
                 double ey = squid.getY() + 0.5;
                 mc.level.addParticle(ParticleTypes.EXPLOSION, squid.getX(), ey, squid.getZ(), 0, 0, 0);
                 for (int i = 0; i < 40; i++) {
@@ -102,40 +117,6 @@ public class KillEffect extends Module {
         }
     }
 
-    /**
-     * 检查实体是否死亡，若是则触发鱿鱼特效。
-     * @return true 表示已死亡（无论是否已触发过，都会防止重复触发）
-     */
-    private boolean checkAndTrigger(LivingEntity entity) {
-        if (triggered.contains(entity.getUUID())) {
-            return true; // 已经炸过了，可以从记录中移除
-        }
-
-        boolean dead = false;
-        if (entity instanceof Player player) {
-            // 玩家：用计分板真实血量（TargetHUD 的数据源）
-            String name = player.getName().getString();
-            if (TargetHud.playerHealthMap.containsKey(name)) {
-                int score = TargetHud.playerHealthMap.get(name).get();
-                if (score <= 0) {
-                    dead = true;
-                }
-            } else {
-                // 没有计分板数据时，回退到常规判断（可能不准确，但聊胜于无）
-                dead = player.isDeadOrDying() || player.getHealth() <= 0.0f;
-            }
-        } else {
-            // 动物/怪物：标准死亡判断
-            dead = entity.isDeadOrDying() || entity.getHealth() <= 0.0f || entity.isRemoved();
-        }
-
-        if (dead) {
-            spawnSquid(entity.getX(), entity.getY() + 1.0, entity.getZ());
-            triggered.add(entity.getUUID());
-        }
-        return dead;
-    }
-
     private void spawnSquid(double x, double y, double z) {
         SoundUtil.playSound("kill.wav", 1.0f);
         Squid squid = new Squid(EntityType.SQUID, mc.level);
@@ -151,13 +132,11 @@ public class KillEffect extends Module {
 
     private void clearEffects() {
         if (mc.level != null) {
-            for (SquidEffect effect : activeSquids) {
-                effect.squid.discard();
-            }
+            for (SquidEffect e : activeSquids) e.squid.discard();
         }
         activeSquids.clear();
-        damagedByMe.clear();
-        triggered.clear();
+        triggeredUUIDs.clear();
+        lastPositionMap.clear();
     }
 
     @Override
