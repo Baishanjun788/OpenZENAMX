@@ -91,7 +91,7 @@ public class ESP extends Module {
         try {
             // 这里假设你的配置文件存在于游戏目录下的 "zen" 文件夹中
             // 如果你的 ConfigManager 用的是别的名字，请把 "zen" 改成对应的文件夹名
-          //  File file = new File(mc.gameDirectory, "zen/chenqiyuan.png");
+            //  File file = new File(mc.gameDirectory, "zen/chenqiyuan.png");
             File file = new File(ConfigManager.CONFIG_DIR, "chenqiyuan.png");
             if (file.exists()) {
                 InputStream is = Files.newInputStream(file.toPath());
@@ -209,7 +209,8 @@ public class ESP extends Module {
         Camera camera = mc.gameRenderer.getMainCamera();
         Vec3 camPos = camera.getPosition();
 
-        RenderSystem.enableDepthTest();
+        // 🌟 关闭深度测试，防止图片被玩家头部模型遮挡（实现透视）
+        RenderSystem.disableDepthTest();
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         // 绑定材质着色器
@@ -225,7 +226,7 @@ public class ESP extends Module {
             // 只渲染玩家头部
             if (!(entity instanceof Player player) || player == mc.player) continue;
 
-            // 计算平滑移动后的位置，头部中心大概在 y + 高度 - 0.25 的位置
+            // 保持你原本的高度：头部中心大概在 y + 高度 - 0.25 的位置
             double x = Mth.lerp(partial, player.xOld, player.getX()) - camPos.x;
             double y = Mth.lerp(partial, player.yOld, player.getY()) - camPos.y + player.getBbHeight() - 0.25;
             double z = Mth.lerp(partial, player.zOld, player.getZ()) - camPos.z;
@@ -253,6 +254,8 @@ public class ESP extends Module {
         }
 
         RenderSystem.disableBlend();
+        // 🌟 渲染完毕后必须恢复深度测试，防止游戏中其他元素渲染错乱
+        RenderSystem.enableDepthTest();
     }
 
     @EventTarget

@@ -33,9 +33,9 @@ public class SwordNotifier extends Module {
     public final BooleanSetting redesp = new BooleanSetting("RED MARK", true);
     public final BooleanSetting sendToPublicChat = new BooleanSetting("Send To Public Chat", false);
 
-    // 🌟 新增：听觉雷达警告（替代眼瞎红屏）
+    // 🌟 听觉雷达警告
     public final BooleanSetting soundAlert = new BooleanSetting("Sound Alert", true);
-    // 🌟 新增：原版光灵箭透视高亮（替代传统ESP方框）
+    // 🌟 原版光灵箭透视高亮
     public final BooleanSetting nativeGlow = new BooleanSetting("Native Glow", true);
 
     private final Set<String> markedPlayerNames = new HashSet<>();
@@ -44,7 +44,13 @@ public class SwordNotifier extends Module {
     private int textIndex = 0;
     private String pendingMessage = "";
     private long retryTime = 0;
-    private long lastSoundTime = 0; // 控制提示音的冷却时间
+
+    // 用于精准控制声音频率的 Tick 计数器 (Minecraft 固定 20 TPS)
+    private int tickCounter = 0;
+
+    // 缓存最近目标的数据，供 Render2D 渲染文本使用
+    private double currentNearestDistance = -1;
+    private String currentNearestName = "";
 
     public SwordNotifier() {
         super("SwordNotifier", Category.RENDER);
@@ -61,18 +67,20 @@ public class SwordNotifier extends Module {
         this.clearMarkers();
         this.pendingMessage = "";
         this.retryTime = 0;
-        this.lastSoundTime = 0;
+        this.tickCounter = 0;
+        this.currentNearestDistance = -1;
+        this.currentNearestName = "";
         super.onEnable();
     }
 
     @Override
     public void onDisable() {
         this.clearMarkers();
+        this.tickCounter = 0;
         super.onDisable();
     }
 
     private void clearMarkers() {
-        // 清理时，顺手把世界里所有被发光的玩家恢复原样
         if (mc.level != null) {
             for (Player player : mc.level.players()) {
                 if (player != null && player.getGameProfile().getName() != null) {
@@ -84,6 +92,8 @@ public class SwordNotifier extends Module {
         }
         this.markedPlayerNames.clear();
         this.alertedPlayerNames.clear();
+        this.currentNearestDistance = -1;
+        this.currentNearestName = "";
     }
 
     private void sendNativeChatMessage(String text) {
@@ -110,18 +120,58 @@ public class SwordNotifier extends Module {
     public void onTick(TickEvent event) {
         if (mc.player == null || mc.level == null) return;
 
-        // 🌟 核心逻辑：给所有被标记的杀手挂上“光灵箭”的原版透视轮廓
+        this.tickCounter++;
+
+        double nearestDistance = -1;
+        String nearestName = "";
+
+        // 🌟 核心逻辑：距离计算 & 设置原版发光
         for (Player player : mc.level.players()) {
             if (player == mc.player) continue;
 
             String rawName = player.getGameProfile().getName();
-            if (rawName != null && this.markedPlayerNames.contains(rawName.toLowerCase().trim())) {
+            if (rawName == null) continue;
+
+            if (this.markedPlayerNames.contains(rawName.toLowerCase().trim())) {
+                // 原版发光机制（每 Tick 强制设置，对抗服务器重置）
                 if (this.nativeGlow.getValue()) {
                     player.setGlowingTag(true);
                 } else {
-                    player.setGlowingTag(false); // 如果关了设置，随时取消发光
+                    player.setGlowingTag(false);
+                }
+
+                // 寻找最近的被标记玩家
+                double distance = mc.player.distanceTo(player);
+                if (nearestDistance < 0 || distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestName = rawName;
                 }
             }
+        }
+
+        // 更新缓存供渲染事件使用
+        this.currentNearestDistance = nearestDistance;
+        this.currentNearestName = nearestName;
+
+        // 🌟 听觉雷达逻辑 (基于 Tick 控制频率)
+        if (this.soundAlert.getValue() && nearestDistance >= 0) {
+            if (nearestDistance <= 10.0) {
+                // 10格以内：每秒 4 下 (20 / 5 = 4)
+                if (this.tickCounter % 5 == 0) {
+                    mc.player.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, 1.0F, 1.0F);
+                }
+            } else if (nearestDistance <= 20.0) {
+                // 10到20格：每秒 2 下 (20 / 10 = 2)
+                if (this.tickCounter % 10 == 0) {
+                    mc.player.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, 1.0F, 1.0F);
+                }
+            } else if (nearestDistance <= 30.0) {
+                // 20到30格：每秒 1 下 (20 / 20 = 1)
+                if (this.tickCounter % 20 == 0) {
+                    mc.player.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, 1.0F, 1.0F);
+                }
+            }
+            // 30格以外不响
         }
     }
 
@@ -198,24 +248,6 @@ public class SwordNotifier extends Module {
     public void onRender2D(Render2DEvent event) {
         if (mc.player == null || mc.level == null) return;
 
-        double nearestDistance = -1;
-        String nearestName = "";
-
-        for (Player player : mc.level.players()) {
-            if (player == mc.player) continue;
-
-            String rawName = player.getGameProfile().getName();
-            if (rawName == null) continue;
-
-            if (!this.markedPlayerNames.contains(rawName.toLowerCase().trim())) continue;
-
-            double distance = mc.player.distanceTo(player);
-            if (nearestDistance < 0 || distance < nearestDistance) {
-                nearestDistance = distance;
-                nearestName = rawName;
-            }
-        }
-
         // 自动冷却重发原版包
         if (this.sendToPublicChat.getValue() && !this.pendingMessage.isEmpty() && this.retryTime > 0) {
             if (System.currentTimeMillis() >= this.retryTime) {
@@ -225,20 +257,11 @@ public class SwordNotifier extends Module {
             }
         }
 
-        if (nearestDistance < 0) return;
+        // 读取 onTick 中计算好的距离进行文本渲染
+        if (this.currentNearestDistance < 0) return;
 
-        // 🌟 新增：听觉雷达报警（距离 30 格以内触发，防刷屏 3 秒冷却）
-        if (this.soundAlert.getValue() && nearestDistance <= 30.0) {
-            if (System.currentTimeMillis() - this.lastSoundTime > 3000L) {
-                // 播放极其清晰且不刺耳的提示音 (经验球吸收的声音)
-                mc.player.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, 1.0F, 1.0F);
-                this.lastSoundTime = System.currentTimeMillis();
-            }
-        }
-
-        // 准星下方危险距离文本 (保留)
         if (this.distanceText.getValue()) {
-            String text = String.format("⚠ 危险目标 [%s] 距你 %.1f 格 ⚠", nearestName, nearestDistance);
+            String text = String.format("⚠ 危险目标 [%s] 距你 %.1f 格 ⚠", this.currentNearestName, this.currentNearestDistance);
 
             int screenWidth = mc.getWindow().getGuiScaledWidth();
             int screenHeight = mc.getWindow().getGuiScaledHeight();
