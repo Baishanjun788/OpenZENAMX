@@ -34,6 +34,7 @@ import org.joml.Matrix4f;
 import org.joml.Vector4d;
 import shit.zen.event.impl.Render2DEvent;
 import shit.zen.event.impl.RenderEvent;
+import shit.zen.manager.ConfigManager;
 import shit.zen.modules.Category;
 import shit.zen.modules.Module;
 import shit.zen.settings.impl.BooleanSetting;
@@ -90,8 +91,8 @@ public class ESP extends Module {
         try {
             // 这里假设你的配置文件存在于游戏目录下的 "zen" 文件夹中
             // 如果你的 ConfigManager 用的是别的名字，请把 "zen" 改成对应的文件夹名
-            File file = new File(mc.gameDirectory, "zen/chenqiyuan.png");
-
+          //  File file = new File(mc.gameDirectory, "zen/chenqiyuan.png");
+            File file = new File(ConfigManager.CONFIG_DIR, "chenqiyuan.png");
             if (file.exists()) {
                 InputStream is = Files.newInputStream(file.toPath());
                 NativeImage image = NativeImage.read(is);
