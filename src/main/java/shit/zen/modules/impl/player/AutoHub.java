@@ -24,7 +24,7 @@ public class AutoHub extends Module {
             // 如果报错，请在代码里尝试下面其中一种，总有一个是你的客户端混淆后的正确写法：
 
 
-            mc.player.connection.sendChat("/hub");
+            mc.player.connection.sendChat("/ hub");
 
             // 选项 2 (如果选项1报错)：有些客户端会把指令方法命名为 execute
             // mc.player.connection.sendCommand("hub");
