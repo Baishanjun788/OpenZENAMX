@@ -40,7 +40,12 @@ public class CameraPatch {
             desc = "(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/world/entity/Entity;ZZF)V",
             at = @At(At.Type.TAIL)
     )
-    public static void onSetup(Camera camera, BlockGetter blockGetter, Entity entity, boolean detached, boolean thirdPerson, float partialTick) {
+    // 【关键修复】去掉 Camera camera 参数！
+    // OpenZen 不会转发 receiver 实例，所以参数必须和原方法一模一样（5个）。
+    // 我们直接通过 Minecraft.getInstance().gameRenderer.getMainCamera() 拿相机实例。
+    public static void onSetup(BlockGetter blockGetter, Entity entity, boolean detached, boolean thirdPerson, float partialTick) {
+        debugChatThrottled("onSetup injected & called");
+
         if (!ZenClient.isReady()) {
             return;
         }
@@ -54,11 +59,13 @@ public class CameraPatch {
             return;
         }
 
-        debugChatThrottled("applying freecam position: " + freeCamPosition);
+        // 直接获取游戏的主相机实例
+        Camera camera = Minecraft.getInstance().gameRenderer.getMainCamera();
 
         try {
             BlockPos blockPos = BlockPos.containing(freeCamPosition.x, freeCamPosition.y, freeCamPosition.z);
 
+            // 按类型暴力反射，不依赖 SRG 字段名
             for (Field field : Camera.class.getDeclaredFields()) {
                 field.setAccessible(true);
                 if (field.getType() == Vec3.class) {
