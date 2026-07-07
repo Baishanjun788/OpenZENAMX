@@ -36,7 +36,9 @@ public class CameraPatch {
     }
 
     @Inject(
-            method = "m_91585_", // 1.20.1 Camera.setup 的 SRG 名
+            method = "m_91585_", // 1.20.1 Camera.setup 的 SRG 名。如果聊天栏完全看不到
+            // "onSetup injected & called"，先怀疑这个名字/desc 不对，
+            // 换回 "setup" 试试（取决于 asm.patchify 是否自动重映射）。
             desc = "(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/world/entity/Entity;ZZF)V",
             at = @At(At.Type.TAIL)
     )
@@ -68,14 +70,28 @@ public class CameraPatch {
         try {
             BlockPos blockPos = BlockPos.containing(freeCamPosition.x, freeCamPosition.y, freeCamPosition.z);
 
+            // 按类型匹配字段。原版 Camera 类正常只有一个 Vec3 字段(position)和一个
+            // BlockPos 字段(blockPosition)，所以这样按类型找通常没问题；但如果有其他
+            // mod 通过 Mixin 给 Camera 加了别的 Vec3/BlockPos 字段，这里会连带把它们也覆盖掉。
+            // 用下面的计数做个保险提示，count 不等于 1 就说明按类型匹配已经不安全了，
+            // 需要改成按字段名精确匹配（比如 "position" / "blockPosition"）。
+            int vec3Count = 0;
+            int blockPosCount = 0;
             for (Field field : Camera.class.getDeclaredFields()) {
                 field.setAccessible(true);
                 if (field.getType() == Vec3.class) {
                     field.set(camera, freeCamPosition);
+                    vec3Count++;
                 } else if (field.getType() == BlockPos.class) {
                     field.set(camera, blockPos);
+                    blockPosCount++;
                 }
             }
+
+            if (vec3Count != 1 || blockPosCount != 1) {
+                debugChat("WARNING: matched " + vec3Count + " Vec3 field(s), " + blockPosCount + " BlockPos field(s) - expected exactly 1 each");
+            }
+
             debugChatThrottled("reflection success");
         } catch (Exception e) {
             debugChat("reflection FAILED: " + e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -83,6 +99,3 @@ public class CameraPatch {
         }
     }
 }
-
-
-//caonima
