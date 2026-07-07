@@ -15,10 +15,6 @@ import shit.zen.modules.impl.render.FreeCam;
 
 import java.lang.reflect.Field;
 
-/**
- * 在游戏原本算完这一帧的相机位置/朝向之后（Camera.setup 跑完），
- * 如果 FreeCam 开着，就把相机坐标强制换成 FreeCam 里维护的那个自由视角坐标。
- */
 @Patch(Camera.class)
 public class CameraPatch {
 
@@ -39,9 +35,8 @@ public class CameraPatch {
         }
     }
 
-    // 【修复】method 名改为 SRG 名 m_91585_，因为运行时是混淆环境
     @Inject(
-            method = "m_91585_", // 对应 Camera.setup
+            method = "m_91585_", // 1.20.1 SRG name for Camera.setup
             desc = "(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/world/entity/Entity;ZZF)V",
             at = @At(At.Type.TAIL)
     )
@@ -65,6 +60,7 @@ public class CameraPatch {
         try {
             BlockPos blockPos = BlockPos.containing(freeCamPosition.x, freeCamPosition.y, freeCamPosition.z);
 
+            // 按类型暴力反射，不依赖 SRG 字段名
             for (Field field : Camera.class.getDeclaredFields()) {
                 field.setAccessible(true);
                 if (field.getType() == Vec3.class) {
