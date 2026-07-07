@@ -128,7 +128,7 @@ public class WatermarkHud
 
         // 隐藏指定IP
         if (serverIp != null && serverIp.contains("118.31.71.254")) {
-            serverIp = serverIp.replace("118.31.71.254", "127.0.0.1");
+            serverIp = serverIp.replace("118.31.71.254", "zamx专属服务器");
         }
 
         int ping = 0;

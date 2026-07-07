@@ -82,7 +82,7 @@ public class ModuleManager extends ClientBase {
         this.register(new MidPearl());
         this.register(new NoFall());
         this.register(new Stuck());
-        this.register(new VoidHub()); // 成功添加 VoidHub
+        this.register(new VoidHub()); // 操你妈Gemini做的还没claude牛逼
 
         // Render
         this.register(new AspectRatio());
