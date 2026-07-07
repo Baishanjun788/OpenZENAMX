@@ -4,17 +4,24 @@ import asm.patchify.annotation.At;
 import asm.patchify.annotation.Inject;
 import asm.patchify.annotation.Patch;
 import net.minecraft.client.Camera;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.phys.Vec3;
 import shit.zen.ZenClient;
 import shit.zen.modules.impl.render.FreeCam;
+import shit.zen.utils.misc.ReflectionUtil;
 
 /**
  * 在游戏原本算完这一帧的相机位置/朝向之后（Camera.setup 跑完），
  * 如果 FreeCam 开着，就把相机坐标强制换成 FreeCam 里维护的那个自由视角坐标。
  * 朝向（yaw/pitch）不动，还是跟着玩家实际的视角走，这样鼠标看方向完全正常，
  * 只有"人在哪"和"镜头在哪"这两件事被拆开了。
+ *
+ * 注意：Camera.setPosition(Vec3) 在原版里是 protected 的，没法从这里直接调用，
+ * 所以改成用 ReflectionUtil 直接写 Camera 内部的 position / blockPosition 两个字段
+ * （原版 setPosition 内部实际上也是同时改这两个字段，blockPosition 是给区块/光照相关
+ * 查找用的派生值，这里一并同步，避免只改 position 导致细节上不一致）。
  */
 @Patch(Camera.class)
 public class CameraPatch {
@@ -37,6 +44,8 @@ public class CameraPatch {
             return;
         }
 
-        camera.setPosition(freeCamPosition);
+        ReflectionUtil.setFieldValue(camera, freeCamPosition, "position");
+        BlockPos blockPosition = BlockPos.containing(freeCamPosition.x, freeCamPosition.y, freeCamPosition.z);
+        ReflectionUtil.setFieldValue(camera, blockPosition, "blockPosition");
     }
 }
