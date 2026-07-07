@@ -29,6 +29,7 @@ import shit.zen.patch.BlockPatch;
 import shit.zen.patch.ChatScreenPatch;
 import shit.zen.patch.ClientLevelPatch;
 import shit.zen.patch.ConnectionPatch;
+import shit.zen.patch.CameraPatch;
 import shit.zen.patch.EntityPatch;
 import shit.zen.patch.EntityRendererPatch;
 import shit.zen.patch.FriendlyByteBufPatch;
