@@ -23,9 +23,9 @@ import shit.zen.render.Paint;
  *   这是 Material Icons Regular 官方字体表里的标准编码，不是这个项目自定义的）
  */
 public class WatermarkHud
-extends ClientBase
-implements IHudElement {
-    private static final FontRenderer logoFont = FontPresets.zenIcon(22.0f);
+        extends ClientBase
+        implements IHudElement {
+    private static final FontRenderer logoFont = FontPresets.newzamx(22.0f);
     private static final FontRenderer wordmarkFont = FontPresets.poppinsBold(15.0f);
     private static final FontRenderer iconFont = FontPresets.materialIcons(13.0f);
     private static final FontRenderer lineFont = FontPresets.poppinsMedium(11.0f);
@@ -49,6 +49,12 @@ implements IHudElement {
     private static final float gapAfterLogo = 8.0f;
     private static final float gapAroundSeparator = 12.0f;
     private static final float gapAfterIcon = 6.0f;
+
+    // 由于 logoFont(自定义 newzamx)和 wordmarkFont 的 capHeight 度量与实际字形视觉高度存在偏差，
+    // 导致居中计算后整体偏下，这里单独做垂直校正（负值 = 往上移）。
+    // 数值已按“Z 偏差更明显”做了差异化处理，如仍有偏差可继续微调。
+    private static final float logoYCorrection = -3.0f;
+    private static final float wordmarkYCorrection = -1.5f;
 
     private int lastTick = -1;
     private String usernameText;
@@ -106,9 +112,9 @@ implements IHudElement {
 
         try (Paint paint = new Paint()) {
             // Logo + 客户端名字
-            this.drawText(drawContext, paint, "Z", drawX, centerY, logoFont, textColor, shadow, true);
+            this.drawText(drawContext, paint, "Z", drawX, centerY + logoYCorrection, logoFont, textColor, shadow, true);
             drawX += logoWidth + gapAfterLogo;
-            this.drawText(drawContext, paint, CLIENT_NAME, drawX, centerY, wordmarkFont, textColor, shadow, true);
+            this.drawText(drawContext, paint, CLIENT_NAME, drawX, centerY + wordmarkYCorrection, wordmarkFont, textColor, shadow, true);
             drawX += wordmarkWidth;
 
             // 分隔符
@@ -186,4 +192,3 @@ implements IHudElement {
         return Scaffold.INSTANCE == null || !Scaffold.INSTANCE.isEnabled();
     }
 }
-//我去老美的nasa这么厉害居然给我探测出来了  八嘎呀路
