@@ -10,8 +10,8 @@ int main(int argc, char** argv) {
 
     QApplication app(argc, argv);
     QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
-    QApplication::setApplicationName(QStringLiteral("OpenZen Loader"));
-    QApplication::setOrganizationName(QStringLiteral("OpenZen"));
+    QApplication::setApplicationName(QStringLiteral("ZENAMX Loader"));
+    QApplication::setOrganizationName(QStringLiteral("ZENAMX"));
 
     // Main window is constructed up front but kept hidden until the splash
     // emits finished(), so its windowOpacity starts at 0 (set in showEvent
