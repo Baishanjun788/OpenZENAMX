@@ -638,10 +638,10 @@ tasks.register('packageDist') {
     // about to produce does not exist yet. doLast runs after buildNative,
     // by which point the file is definitely on disk.
     doLast {
-        def src = file("$nativeBuildDir/loader/Release/OpenZenLoader.exe")
+        def src = file("$nativeBuildDir/loader/Release/ZENAMX Loader.exe")
         if (!src.isFile()) {
             throw new GradleException(
-                "Expected OpenZenLoader.exe at ${src} after buildNative; missing")
+                "Expected ZENAMX Loader.exe at ${src} after buildNative; missing")
         }
         copy {
             from src
@@ -667,12 +667,12 @@ ext.findUpx = {
 
 tasks.register('upxCompress') {
     group = 'openzen'
-    description = 'Run UPX --best --lzma on the packaged OpenZenLoader.exe. ' +
+    description = 'Run UPX --best --lzma on the packaged ZENAMX Loader.exe. ' +
                   'No-op (warning only) when upx is not on PATH so local builds ' +
                   'do not need it installed.'
     dependsOn 'packageDist'
     doLast {
-        def exe = file("$buildDir/dist/OpenZenLoader.exe")
+        def exe = file("$buildDir/dist/ZENAMX Loader.exe")
         if (!exe.isFile()) {
             throw new GradleException("packageDist did not produce ${exe}")
         }
