@@ -1,5 +1,6 @@
 package shit.zen.modules.impl.render;
 
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.Vec3;
 import shit.zen.event.EventTarget;
 import shit.zen.event.impl.StrafeEvent;
@@ -43,24 +44,36 @@ public class FreeCam extends Module {
     public final NumberSetting speed = new NumberSetting("Speed", 0.5, 0.05, 3.0, 0.05);
 
     private Vec3 position;
+    private int debugTickCounter = 0;
 
     public FreeCam() {
         super("FreeCam", Category.RENDER);
         INSTANCE = this;
     }
 
+    /**
+     * 调试用：把消息直接发到游戏聊天栏，而不是打印到控制台/日志文件，
+     * 方便直接在游戏里看结果，不用去翻 latest.log。
+     * 排查完问题后记得删掉所有调用这个方法的地方。
+     */
+    private void debugChat(String message) {
+        if (mc.player != null) {
+            mc.player.displayClientMessage(Component.literal("[FreeCam] " + message), false);
+        }
+    }
+
     @Override
     public void onEnable() {
-        System.out.println("[FreeCam] onEnable called, player=" + (mc.player != null));
+        this.debugChat("onEnable called, player=" + (mc.player != null));
         if (mc.player != null) {
             this.position = mc.player.getEyePosition();
-            System.out.println("[FreeCam] initial position=" + this.position);
+            this.debugChat("initial position=" + this.position);
         }
     }
 
     @Override
     public void onDisable() {
-        System.out.println("[FreeCam] onDisable called");
+        this.debugChat("onDisable called");
         this.position = null;
     }
 
@@ -82,7 +95,12 @@ public class FreeCam extends Module {
         try {
             this.doStrafe(event);
         } catch (Throwable t) {
-            System.out.println("[FreeCam] onStrafe REAL EXCEPTION: " + t.getClass().getName() + ": " + t.getMessage());
+            this.debugChat("REAL EXCEPTION: " + t.getClass().getName() + ": " + t.getMessage());
+            // 堆栈行数比较多，聊天栏放不下，这里只发前 3 行到聊天栏，完整堆栈还是打印到控制台方便复制。
+            StackTraceElement[] trace = t.getStackTrace();
+            for (int i = 0; i < Math.min(3, trace.length); i++) {
+                this.debugChat("  at " + trace[i].toString());
+            }
             t.printStackTrace();
         }
     }
@@ -122,8 +140,12 @@ public class FreeCam extends Module {
 
         this.position = this.position.add(moveX, moveY, moveZ);
 
-        // 调试：每 tick 坐标变化。日志量大，排查完记得注释掉或删掉。
-        System.out.println("[FreeCam] onStrafe position=" + this.position + " forward=" + forward + " strafe=" + strafe + " flyUp=" + flyUp + " flyDown=" + flyDown);
+        // 调试：坐标变化。每 tick 都发聊天栏会刷屏，这里节流成每 20 tick（约 1 秒）发一次。
+        this.debugTickCounter++;
+        if (this.debugTickCounter >= 20) {
+            this.debugTickCounter = 0;
+            this.debugChat("position=" + this.position + " forward=" + forward + " strafe=" + strafe + " flyUp=" + flyUp + " flyDown=" + flyDown);
+        }
 
         // 把这个tick的移动量清零，真实玩家本体就不会跟着走
         event.setForward(0.0f);
