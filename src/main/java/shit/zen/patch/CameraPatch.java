@@ -36,13 +36,11 @@ public class CameraPatch {
     }
 
     @Inject(
-            method = "m_91585_", // 1.20.1 SRG name for Camera.setup
+            method = "m_91585_", // 1.20.1 Camera.setup 的 SRG 名
             desc = "(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/world/entity/Entity;ZZF)V",
             at = @At(At.Type.TAIL)
     )
     public static void onSetup(Camera camera, BlockGetter blockGetter, Entity entity, boolean detached, boolean thirdPerson, float partialTick) {
-        debugChatThrottled("onSetup called");
-
         if (!ZenClient.isReady()) {
             return;
         }
@@ -53,14 +51,14 @@ public class CameraPatch {
 
         Vec3 freeCamPosition = FreeCam.INSTANCE.getPosition();
         if (freeCamPosition == null) {
-            debugChatThrottled("FreeCam position is null, skip");
             return;
         }
+
+        debugChatThrottled("applying freecam position: " + freeCamPosition);
 
         try {
             BlockPos blockPos = BlockPos.containing(freeCamPosition.x, freeCamPosition.y, freeCamPosition.z);
 
-            // 按类型暴力反射，不依赖 SRG 字段名
             for (Field field : Camera.class.getDeclaredFields()) {
                 field.setAccessible(true);
                 if (field.getType() == Vec3.class) {
