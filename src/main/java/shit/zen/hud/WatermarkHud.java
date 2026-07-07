@@ -25,7 +25,7 @@ import shit.zen.render.Paint;
 public class WatermarkHud
         extends ClientBase
         implements IHudElement {
-    private static final FontRenderer logoFont = FontPresets.newzamx(22.0f);
+    private static final FontRenderer logoFont = FontPresets.zenIcon(22.0f);
     private static final FontRenderer wordmarkFont = FontPresets.poppinsBold(15.0f);
     private static final FontRenderer iconFont = FontPresets.materialIcons(13.0f);
     private static final FontRenderer lineFont = FontPresets.poppinsMedium(11.0f);
@@ -53,8 +53,8 @@ public class WatermarkHud
     // 由于 logoFont(自定义 newzamx)和 wordmarkFont 的 capHeight 度量与实际字形视觉高度存在偏差，
     // 导致居中计算后整体偏下，这里单独做垂直校正（负值 = 往上移）。
     // 数值已按“Z 偏差更明显”做了差异化处理，如仍有偏差可继续微调。
-    private static final float logoYCorrection = -3.0f;
-    private static final float wordmarkYCorrection = -1.5f;
+    private static final float logoYCorrection = -1.0f;
+    private static final float wordmarkYCorrection = -0.5f;
 
     private int lastTick = -1;
     private String usernameText;

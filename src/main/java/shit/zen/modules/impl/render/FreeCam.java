@@ -1,29 +1,40 @@
 package shit.zen.modules.impl.render;
 
-import net.minecraft.client.player.RemotePlayer;
-import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
-import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
-import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.Vec3;
 import shit.zen.event.EventTarget;
-import shit.zen.event.impl.PacketEvent;
-import shit.zen.event.impl.TickEvent;
+import shit.zen.event.impl.StrafeEvent;
 import shit.zen.modules.Category;
 import shit.zen.modules.Module;
 import shit.zen.settings.impl.NumberSetting;
 
+/**
+ * 自由视角（Freecam）：开启后镜头可以脱离身体自由飞行，方便你在原地按按钮/拉杆的同时
+ * 飞到别的角度去看红石线路的运行状态，人物本体不会跟着移动。
+ *
+ * 操作方式（跟创造模式飞行一样）：
+ *   W/A/S/D  水平移动（按你视角朝向的水平方向飞，不管你往上/下看都不影响水平飞行）
+ *   空格      往上飞
+ *   Shift    往下飞
+ *   鼠标      正常看方向，不受影响
+ *
+ * 实现原理：
+ *   - StrafeEvent 是每 tick 拿到的"WASD 换算出来的移动量"，这里读出来用来推动一个独立的
+ *     自由视角坐标（this.position），然后把这个事件的移动量清零再交还给游戏，这样真实玩家
+ *     的移动输入就被"拦截"了，本体不会跟着走。
+ *   - 真正把镜头挪到 this.position 这个位置，需要在 Camera.setup() 之后强制覆盖一次相机坐标，
+ *     这部分逻辑在新增的 CameraPatch.java 里（这个模块本身不摸渲染，只负责算"镜头应该在哪"）。
+ *
+ * 注意：这个不是 noclip 意义上的"允许穿墙走路"，只是镜头位置脱离了身体，
+ * 如果想要镜头也能穿过方块自由飞（而不是被"卡"在原地一样只是看向别处），
+ * 这个实现天生就是这样的（镜头本来就不受碰撞箱限制），可以直接飞进方块里看内部结构。
+ */
 public class FreeCam extends Module {
 
     public static FreeCam INSTANCE;
 
-    public final NumberSetting speed = new NumberSetting("Speed", 1.0, 0.1, 5.0, 0.1);
+    public final NumberSetting speed = new NumberSetting("Speed", 0.5, 0.05, 3.0, 0.05);
 
-    // 记录开启时的本体位置
-    private double startX, startY, startZ;
-    private float startYaw, startPitch;
-
-    // 留在原地的假人
-    private RemotePlayer dummy;
-    private final int DUMMY_ENTITY_ID = -6969; // 负数ID防止和服务器实体冲突
+    private Vec3 position;
 
     public FreeCam() {
         super("FreeCam", Category.RENDER);
@@ -31,78 +42,63 @@ public class FreeCam extends Module {
     }
 
     @Override
-    protected void onEnable() {
-        if (mc.player == null || mc.level == null) return;
-
-        // 1. 记录当前本体坐标
-        this.startX = mc.player.getX();
-        this.startY = mc.player.getY();
-        this.startZ = mc.player.getZ();
-        this.startYaw = mc.player.getYRot();
-        this.startPitch = mc.player.getXRot();
-
-        // 2. 在原地生成一个假人（代替你站在那里）
-        this.dummy = new RemotePlayer(mc.level, mc.player.getGameProfile());
-        this.dummy.setPos(this.startX, this.startY, this.startZ);
-        this.dummy.setYRot(this.startYaw);
-        this.dummy.setXRot(this.startPitch);
-        this.dummy.setYHeadRot(mc.player.getYHeadRot());
-        // 同步你手上的物品和装备给假人
-        this.dummy.getInventory().replaceWith(mc.player.getInventory());
-
-        // 将假人加入客户端世界渲染
-    //    mc.level.getEntity(DUMMY_ENTITY_ID, this.dummy);
-
-        super.onEnable();
+    public void onEnable() {
+        if (mc.player != null) {
+            this.position = mc.player.getEyePosition();
+        }
     }
 
     @Override
-    protected void onDisable() {
-        if (mc.player != null && mc.level != null) {
-            // 1. 玩家位置瞬移回开启时的坐标
-            mc.player.setPos(this.startX, this.startY, this.startZ);
-            mc.player.setYRot(this.startYaw);
-            mc.player.setXRot(this.startPitch);
+    public void onDisable() {
+        this.position = null;
+    }
 
-            // 2. 停止穿墙和飞行
-            mc.player.noPhysics = false;
-            mc.player.getAbilities().flying = false;
-            mc.player.setDeltaMovement(0, 0, 0);
-
-            // 3. 删除假人
-            if (this.dummy != null) {
-                mc.level.removeEntity(DUMMY_ENTITY_ID, Entity.RemovalReason.DISCARDED);
-                this.dummy = null;
-            }
-        }
-        super.onDisable();
+    /**
+     * 供 CameraPatch 读取当前自由视角应该在的位置。
+     */
+    public Vec3 getPosition() {
+        return this.position;
     }
 
     @EventTarget
-    public void onTick(TickEvent event) {
-        if (mc.player == null) return;
-
-        // 强制开启飞行和穿墙 (noclip)
-        mc.player.noPhysics = true;
-        mc.player.getAbilities().flying = true;
-
-        // 可选：根据设置动态调整飞行速度
-        mc.player.getAbilities().setFlyingSpeed(speed.getValue().floatValue() * 0.05f);
-    }
-
-    @EventTarget
-    public void onPacket(PacketEvent event) {
-        if (mc.player == null) return;
-
-        // 核心：拦截发往服务器的移动数据包
-        // 这样服务器会认为你一直站在原地（假人的位置），而你实际上在客户端里到处飞
-        if (event.getPacket() instanceof ServerboundMovePlayerPacket) {
-            event.isCancelled();
+    public void onStrafe(StrafeEvent event) {
+        if (mc.player == null) {
+            return;
+        }
+        if (this.position == null) {
+            this.position = mc.player.getEyePosition();
         }
 
-        // 拦截疾跑、潜行等动作状态包，防止引起服务器行为异常检测
-        if (event.getPacket() instanceof ServerboundPlayerCommandPacket) {
-            event.isCancelled();
+        float forward = event.getForward();
+        float strafe = event.getStrafe();
+        // 这个事件里的字段名叫 isSprinting，但它实际对应的是跳跃键(空格)的按下状态
+        boolean flyUp = event.isSprinting();
+        boolean flyDown = mc.options.keyShift.isDown();
+
+        double moveSpeed = (double) this.speed.getValue();
+        double yawRad = Math.toRadians(mc.player.getYRot());
+
+        // 只用水平朝向算移动方向，抬头/低头不影响飞行平面，飞起来更好控制
+        double forwardX = -Math.sin(yawRad);
+        double forwardZ = Math.cos(yawRad);
+        double strafeX = Math.cos(yawRad);
+        double strafeZ = Math.sin(yawRad);
+
+        double moveX = (forwardX * forward + strafeX * strafe) * moveSpeed;
+        double moveZ = (forwardZ * forward + strafeZ * strafe) * moveSpeed;
+        double moveY = 0.0;
+        if (flyUp) {
+            moveY += moveSpeed;
         }
+        if (flyDown) {
+            moveY -= moveSpeed;
+        }
+
+        this.position = this.position.add(moveX, moveY, moveZ);
+
+        // 把这个tick的移动量清零，真实玩家本体就不会跟着走
+        event.setForward(0.0f);
+        event.setStrafe(0.0f);
+        event.setSprinting(false);
     }
 }

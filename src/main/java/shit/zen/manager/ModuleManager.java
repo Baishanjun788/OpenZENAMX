@@ -90,7 +90,9 @@ public class ModuleManager extends ClientBase {
         this.register(new ClickGuiModule());
         this.register(new Compass());
         this.register(new DamageGlow());
+        this.register(new BoardReplace());
         this.register(new ESP());
+
         this.register(new FullBright());
         this.register(new Interface());
         this.register(new ItemTags());
