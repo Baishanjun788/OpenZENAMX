@@ -8,15 +8,18 @@ import java.util.HashSet;
 import shit.zen.event.impl.DisconnectEvent;
 import shit.zen.modules.Category;
 import shit.zen.modules.Module;
+import shit.zen.modules.impl.misc.NotiSound;
+import shit.zen.settings.impl.BooleanSetting;
 import shit.zen.utils.misc.ChatUtil;
 import shit.zen.event.EventTarget;
 
 public class Debugger
 extends Module {
+    public static NotiSound INSTANCE;
     public Debugger() {
         super("Debugger", Category.WORLD);
     }
-
+    public static final BooleanSetting debugqwq = new BooleanSetting("All Debug", false);
     @EventTarget
     public void onDisconnect(DisconnectEvent disconnectEvent) {
         HashSet<String> suspiciousClasses = new HashSet<>();

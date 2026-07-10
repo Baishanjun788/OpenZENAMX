@@ -10,8 +10,8 @@ public class NotiSound extends Module {
     // 🌟 音效模式切换设置：这里填入你想支持的音效名字，比如 "Skeet", "Neverlose", "Custom" 等
     private final ModeSetting soundModeSetting = new ModeSetting(
             "Sound Mode", 
-            "chenxx", "botton", "none"
-    ).withDefault("bottom");
+            "chenxx", "button", "experience","none"
+    ).withDefault("button");
 
     public NotiSound() {
         // 如果你的 Category 里没有 CLIENT，可以改成 Category.RENDER

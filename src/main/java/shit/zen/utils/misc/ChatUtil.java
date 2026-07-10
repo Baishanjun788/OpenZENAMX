@@ -4,6 +4,8 @@ import lombok.Generated;
 import net.minecraft.client.gui.components.ChatComponent;
 import net.minecraft.network.chat.Component;
 import shit.zen.ClientBase;
+import shit.zen.modules.impl.misc.NotiSound;
+import shit.zen.modules.impl.world.Debugger;
 
 public final class ChatUtil
 extends ClientBase {
@@ -13,11 +15,23 @@ extends ClientBase {
     }
 
     public static void print(String message) {
-        ChatUtil.print(true, message);
+        if (Debugger.INSTANCE != null) {
+
+            if(Debugger.debugqwq.getValue()){
+                ChatUtil.print(true, message);
+            }
+        }
+
     }
 
     public static void print(boolean withPrefix, String message) {
-        ChatUtil.addMessage(Component.nullToEmpty((withPrefix ? "§7[§b§7] " : "") + message));
+        if (Debugger.INSTANCE != null) {
+
+            if(Debugger.debugqwq.getValue()){
+                ChatUtil.addMessage(Component.nullToEmpty((withPrefix ? "§7[§b§7] " : "") + message));
+            }
+        }
+
     }
 
     @Generated
