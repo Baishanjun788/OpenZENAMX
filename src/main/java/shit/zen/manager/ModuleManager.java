@@ -52,7 +52,7 @@ public class ModuleManager extends ClientBase {
         this.register(new AutoClicker());
         this.register(new AutoRod());
         this.register(new SafeWalk());
-        this.register(new Protocol());
+        //this.register(new Protocol());
         this.register(new MusicPlayer());
 
         // Movement

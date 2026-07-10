@@ -78,9 +78,9 @@ public class Backtrack extends Module {
         }
     }
 
-    private final NumberSetting minRange = new NumberSetting("Min Range", 3.0, 1.0, 6.0, 0.1);
-    private final NumberSetting maxRange = new NumberSetting("Max Range", 6.0, 1.0, 6.0, 0.1);
-    private final NumberSetting delay = new NumberSetting("Delay", 200.0, 0.0, 1000.0, 10.0);
+    private final NumberSetting minRange = new NumberSetting("Min Range", 2.7, 1.0, 6.0, 0.1);
+    private final NumberSetting maxRange = new NumberSetting("Max Range", 5.0, 1.0, 6.0, 0.1);
+    private final NumberSetting delay = new NumberSetting("Delay", 600.0, 0.0, 1000.0, 10.0);
     private final NumberSetting chance = new NumberSetting("Chance", 100.0, 5.0, 100.0, 1.0);
     private final BooleanSetting resetOnVelocity = new BooleanSetting("Reset On Velocity", true);
     private final BooleanSetting render = new BooleanSetting("Render", true);

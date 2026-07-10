@@ -40,9 +40,7 @@ extends Module {
         if (mc.player == null) {
             return false;
         }
-        if (mc.player.containerMenu instanceof InventoryMenu) {
-            return InventoryManager.isPerformingAction;
-        }
+
         return false;
     }
 

@@ -1,9 +1,13 @@
+// Co-Author @Pickbowen Pickbowen/OpenNilore
+
+
 package shit.zen.modules.impl.movement;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.datafixers.util.Pair;
 import java.util.ArrayDeque;
 import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -18,6 +22,7 @@ import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
+import net.minecraft.network.protocol.game.ServerboundContainerClosePacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundPongPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
@@ -25,6 +30,7 @@ import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.Item;
@@ -33,6 +39,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.PotionItem;
 import net.minecraft.world.item.UseAnim;
 import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import org.lwjgl.glfw.GLFW;
 import shit.zen.event.impl.MotionEvent;
 import shit.zen.event.impl.PacketEvent;
@@ -45,17 +52,13 @@ import shit.zen.settings.impl.ModeSetting;
 import shit.zen.settings.impl.NumberSetting;
 import shit.zen.utils.animation.Timer;
 import shit.zen.utils.misc.PacketUtil;
-import shit.zen.utils.misc.Triple;
-import shit.zen.utils.misc.TripleProvider;
 import shit.zen.event.EventTarget;
 
 public class NoSlow extends Module {
     public static NoSlow INSTANCE;
     public static boolean releaseItemSent;
 
-    public enum UseState {
-        IDLE, WAITING, SWAPPING, USING
-    }
+    private enum Step { NONE, ARMED, EATING }
 
     public final ModeSetting mode             = new ModeSetting("Mode", "Grim V3", "NoSlow").withDefault("Grim V3");
     public final BooleanSetting bowNoSlow      = new BooleanSetting("Bow", false, this::isGrimSlowMode);
@@ -69,7 +72,6 @@ public class NoSlow extends Module {
 
     private final Timer timer = new Timer();
     private final Queue<Packet<ClientGamePacketListener>> inboundQueue = new ArrayDeque<>();
-    private final Queue<ServerboundPongPacket> pongQueue = new ArrayDeque<>();
     private InteractionHand useHand     = InteractionHand.MAIN_HAND;
     private InteractionHand lastUseHand = InteractionHand.MAIN_HAND;
     private InteractionHand pendingUseHand;
@@ -81,10 +83,12 @@ public class NoSlow extends Module {
     private boolean isBlinking;
     private int blinkTicks;
     private int blinkDuration;
-    private UseState useState = UseState.IDLE;
-    private boolean didSwapOffhand;
-    private int idleTickCount;
-    private int savedHotbarSlot = -1;
+    private Step step = Step.NONE;
+    private boolean hasSwapped = false;
+    private boolean swapInArmed = false;
+    private int noUseTicks = 0;
+    private int rightClickHoldTicks = 0;
+    private final Queue<Packet<?>> cached = new ConcurrentLinkedQueue<>();
 
     public NoSlow() {
         super("NoSlow", Category.MOVEMENT);
@@ -95,20 +99,22 @@ public class NoSlow extends Module {
     public void onEnable() {
         releaseItemSent = false;
         this.releaseTicksRemaining = 0;
-        this.clearOffhandQueue();
+        this.rightClickHoldTicks = 0;
+        this.reset();
         this.stopBlink();
         super.onEnable();
     }
 
     @Override
     public void onDisable() {
-        this.resetOffhandState();
+        this.release();
         this.stopBlink();
         releaseItemSent = false;
         this.didSwapHand = false;
         this.shouldReleaseItem = false;
         this.pendingUseHand = null;
         this.releaseTicksRemaining = 0;
+        this.rightClickHoldTicks = 0;
         this.restoreUseKeyState();
         super.onDisable();
     }
@@ -123,10 +129,15 @@ public class NoSlow extends Module {
             return;
         }
         if (!this.isGrimSlowMode()) return;
-        if (!(Boolean) this.bowNoSlow.getValue()) {
-            this.handleOffhandSlowdown(event, stack);
+        // NoC0FNoSlow: cancel slowdown when in EATING step
+        if (step == Step.EATING) {
+            event.setSlowDown(false);
+            if (this.keepSprinting.getValue() && mc.player != null) {
+                mc.player.setSprinting(true);
+            }
             return;
         }
+        if (!(Boolean) this.bowNoSlow.getValue()) return;
         if (!this.canSwapHands()) return;
         UseAnim anim = stack.getUseAnimation();
         if (anim == UseAnim.BOW && this.crossbowNoSlow.getValue()
@@ -143,24 +154,64 @@ public class NoSlow extends Module {
     @EventTarget
     public void onTick(TickEvent event) {
         if (mc.player == null) {
-            this.clearOffhandQueue();
+            this.release();
             this.stopBlink();
             return;
         }
         if (this.isBlinking) {
             ++this.blinkTicks;
         }
-        if ((!this.isGrimSlowMode() || this.bowNoSlow.getValue()) && this.useState != UseState.IDLE) {
-            this.resetOffhandState();
+        // NoC0FNoSlow: reset offhand state if switching away from GrimV3 mode
+        if (!this.isGrimSlowMode() && this.step != Step.NONE) {
+            this.release();
         }
-        if (this.useState == UseState.USING) {
-            if (mc.player.isUsingItem()) {
-                this.idleTickCount = 0;
-            } else if (++this.idleTickCount >= 5) {
-                this.resetOffhandState();
+        // NoC0FNoSlow: offhand state machine tick logic
+        if (this.isGrimSlowMode()) {
+            if (step != Step.NONE && step != Step.EATING) {
+                mc.options.keyUse.setDown(false);
             }
-        } else {
-            this.idleTickCount = 0;
+
+            if (step == Step.NONE) {
+                if (mc.player.isUsingItem()
+                        && mc.options.keyUse.isDown()
+                        && isUsable(mc.player.getUseItem().getUseAnimation())) {
+                    if (isLookingAtInteractableBlock()) {
+                        rightClickHoldTicks = 0;
+                        return;
+                    }
+                    rightClickHoldTicks++;
+                    if (rightClickHoldTicks < 3) {
+                        return;
+                    }
+                    rightClickHoldTicks = 0;
+                    InteractionHand hand = mc.player.getUsedItemHand();
+                    if (hand == InteractionHand.OFF_HAND
+                            || (hand == InteractionHand.MAIN_HAND && mc.player.getOffhandItem().isEmpty())) {
+                        step = Step.ARMED;
+                        mc.options.keyUse.setDown(false);
+
+                        if (mc.player.containerMenu != mc.player.inventoryMenu) {
+                            mc.getConnection().send(
+                                    new ServerboundContainerClosePacket(mc.player.containerMenu.containerId));
+                        }
+                    }
+                } else {
+                    rightClickHoldTicks = 0;
+                }
+            } else if (step == Step.EATING) {
+                if (!mc.options.keyUse.isDown()) {
+                    release();
+                } else if (mc.player.isUsingItem()) {
+                    noUseTicks = 0;
+                } else {
+                    noUseTicks++;
+                    if (noUseTicks >= 5) {
+                        release();
+                    }
+                }
+            } else {
+                noUseTicks = 0;
+            }
         }
         if (this.releaseTicksRemaining > 0) {
             this.releaseUseKey();
@@ -215,7 +266,40 @@ public class NoSlow extends Module {
             event.setCancelled(true);
             return;
         }
-        this.handleOffhandPacket(event);
+        if (this.isGrimSlowMode()) {
+            Packet<?> p = event.getPacket();
+
+            if (!event.isIncoming()) {
+                // Send packet handling
+                if ((step == Step.ARMED || step == Step.EATING) && p instanceof ServerboundPongPacket) {
+                    event.setCancelled(true);
+                    cached.offer(p);
+
+                    if (step == Step.ARMED && !swapInArmed) {
+                        swapInArmed = true;
+                        hasSwapped = true;
+                        mc.getConnection().send(new ServerboundPlayerActionPacket(
+                                ServerboundPlayerActionPacket.Action.SWAP_ITEM_WITH_OFFHAND, BlockPos.ZERO, Direction.DOWN));
+                    }
+                }
+
+                if (step == Step.EATING
+                        && p instanceof ServerboundPlayerActionPacket action
+                        && action.getAction() == ServerboundPlayerActionPacket.Action.RELEASE_USE_ITEM) {
+                    release();
+                }
+            } else {
+                if (step == Step.ARMED && swapInArmed && p instanceof ClientboundContainerSetSlotPacket) {
+                    swapInArmed = false;
+                    mc.options.keyUse.setDown(true);
+                    step = Step.EATING;
+                }
+
+                if (step != Step.NONE && p instanceof ClientboundPlayerPositionPacket) {
+                    release();
+                }
+            }
+        }
         if (event.getPacket() instanceof ServerboundPlayerActionPacket actionPacket
                 && actionPacket.getAction() == ServerboundPlayerActionPacket.Action.RELEASE_USE_ITEM) {
             this.blinkTicks = Math.max(this.blinkTicks, 1);
@@ -276,6 +360,9 @@ public class NoSlow extends Module {
 
     private void startUseItem(InteractionHand hand, int count) {
         if (mc.player == null) return;
+        if (isLookingAtInteractableBlock()) {
+            return;
+        }
         this.didSwapHand = true;
         this.lastUseHand = hand;
         this.swapInitSlot = mc.player.getInventory().selected;
@@ -326,78 +413,67 @@ public class NoSlow extends Module {
         if (!this.isEnabled() || !this.isGrimSlowMode() || this.bowNoSlow.getValue()) return false;
         if (minecraft == null || minecraft.player == null || minecraft.hitResult == null) return false;
         if (minecraft.hitResult.getType() != HitResult.Type.BLOCK) return false;
+        if (isOffhandFoodMainhandBlock()) return false;
         for (InteractionHand hand : InteractionHand.values()) {
-            if (this.isFoodOrPotion(minecraft.player.getItemInHand(hand))) return true;
+            if (isUsable(minecraft.player.getItemInHand(hand).getUseAnimation())) return true;
         }
         return false;
     }
 
-    private void handleOffhandSlowdown(SlowdownEvent event, ItemStack stack) {
-        if (!this.isFoodOrPotion(stack) || mc.player.getUseItemRemainingTicks() <= 0) return;
-        InteractionHand otherHand = mc.player.getUsedItemHand() == InteractionHand.MAIN_HAND
-                ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
-        if (this.isUseAnimation(mc.player.getItemInHand(otherHand).getUseAnimation())) {
-            if (this.useState != UseState.IDLE) this.resetOffhandState();
+    // ===== NoC0FNoSlow methods =====
+
+    private void reset() {
+        step = Step.NONE;
+        hasSwapped = false;
+        swapInArmed = false;
+        noUseTicks = 0;
+        rightClickHoldTicks = 0;
+        cached.clear();
+    }
+
+    private void release() {
+        if (step == Step.NONE && cached.isEmpty() && !hasSwapped) {
             return;
         }
-        if (this.useState != UseState.USING) {
-            mc.options.keyUse.setDown(false);
-        }
-        if (this.useState == UseState.IDLE) {
-            this.useState = UseState.WAITING;
-            this.savedHotbarSlot = mc.player.getInventory().selected;
+        step = Step.NONE;
+        noUseTicks = 0;
+        swapInArmed = false;
+        if (mc.player == null || mc.getConnection() == null) {
+            cached.clear();
             return;
         }
-        if (this.useState == UseState.USING) {
-            event.setSlowDown(false);
-            if (this.keepSprinting.getValue()) {
-                mc.player.setSprinting(true);
-            }
+        while (!cached.isEmpty()) {
+            mc.getConnection().send(cached.poll());
+        }
+        if (hasSwapped) {
+            mc.getConnection().send(new ServerboundPlayerActionPacket(
+                    ServerboundPlayerActionPacket.Action.SWAP_ITEM_WITH_OFFHAND, BlockPos.ZERO, Direction.DOWN));
+            hasSwapped = false;
         }
     }
 
-    private void handleOffhandPacket(PacketEvent event) {
-        if (!this.isGrimSlowMode() || this.bowNoSlow.getValue()) return;
-        Packet<?> packet = event.getPacket();
-        if (!event.isIncoming()) {
-            if (packet instanceof ServerboundPongPacket pong) {
-                if (this.useState != UseState.IDLE) {
-                    event.setCancelled(true);
-                    this.pongQueue.add(pong);
-                    if (this.useState == UseState.WAITING) {
-                        this.useState = UseState.SWAPPING;
-                        this.didSwapOffhand = true;
-                        this.sendSwapOffhand();
-                    }
-                    return;
-                }
-            }
-            if (packet instanceof ServerboundPlayerActionPacket action
-                    && action.getAction() == ServerboundPlayerActionPacket.Action.RELEASE_USE_ITEM
-                    && this.useState == UseState.USING) {
-                this.resetOffhandState();
-            }
-            return;
-        }
-        if (this.useState == UseState.SWAPPING && this.isEquipmentChangePacket(packet)) {
-            mc.options.keyUse.setDown(true);
-            this.useState = UseState.USING;
-            this.idleTickCount = 0;
-            return;
-        }
-        if (packet instanceof ClientboundSetEntityMotionPacket motion
-                && motion.getId() == mc.player.getId() && this.useState == UseState.USING) {
-            mc.options.keyUse.setDown(false);
-        }
+    private boolean isUsable(UseAnim action) {
+        return action == UseAnim.EAT || action == UseAnim.DRINK || action == UseAnim.SPEAR;
     }
 
-    private boolean isFoodOrPotion(ItemStack stack) {
-        if (stack.isEmpty()) return false;
-        UseAnim anim = stack.getUseAnimation();
-        if (anim != UseAnim.EAT && anim != UseAnim.DRINK) return false;
-        Item item = stack.getItem();
-        return stack.isEdible() && this.potionNoSlow.getValue()
-                || item instanceof PotionItem && this.shieldNoSlow.getValue();
+    private boolean isOffhandFoodMainhandBlock() {
+        if (mc.player == null) return false;
+        ItemStack offhand = mc.player.getOffhandItem();
+        ItemStack mainhand = mc.player.getMainHandItem();
+        return isUsable(offhand.getUseAnimation())
+                && !mainhand.isEmpty()
+                && mainhand.getItem() instanceof BlockItem;
+    }
+
+    private boolean isLookingAtInteractableBlock() {
+        if (mc.player == null || mc.level == null) return false;
+        if (mc.hitResult == null || mc.hitResult.getType() != HitResult.Type.BLOCK) return false;
+
+        Vec3 hitVec = mc.hitResult.getLocation();
+        BlockPos pos = new BlockPos((int) hitVec.x, (int) hitVec.y, (int) hitVec.z);
+
+        if (mc.level.isEmptyBlock(pos)) return false;
+        return !mc.player.isCrouching() || !mc.player.getMainHandItem().isEmpty();
     }
 
     private boolean isEatOrDrink(ItemStack stack) {
@@ -409,47 +485,9 @@ public class NoSlow extends Module {
                 || item instanceof PotionItem && this.shieldNoSlow.getValue();
     }
 
-    private boolean isUseAnimation(UseAnim anim) {
-        return anim == UseAnim.EAT || anim == UseAnim.DRINK || anim == UseAnim.BOW
-                || anim == UseAnim.SPEAR || anim == UseAnim.CROSSBOW;
-    }
-
-    private boolean isEquipmentChangePacket(Packet<?> packet) {
-        if (packet instanceof ClientboundContainerSetSlotPacket) return true;
-        if (packet instanceof ClientboundSetEquipmentPacket eq) {
-            for (Pair<EquipmentSlot, ItemStack> pair : eq.getSlots()) {
-                if (pair.getFirst() == EquipmentSlot.OFFHAND) return true;
-            }
-        }
-        return false;
-    }
-
-    private void resetOffhandState() {
-        if (this.useState == UseState.IDLE && this.pongQueue.isEmpty() && !this.didSwapOffhand) {
-            this.clearOffhandQueue();
-            return;
-        }
-        while (!this.pongQueue.isEmpty()) {
-            PacketUtil.sendQueued(this.pongQueue.poll());
-        }
-        if (this.didSwapOffhand) {
-            this.sendSwapOffhand();
-        }
-        this.clearOffhandQueue();
-        this.restoreUseKeyState();
-    }
-
     private void sendSwapOffhand() {
         PacketUtil.sendQueued(new ServerboundPlayerActionPacket(
                 ServerboundPlayerActionPacket.Action.SWAP_ITEM_WITH_OFFHAND, BlockPos.ZERO, Direction.DOWN));
-    }
-
-    private void clearOffhandQueue() {
-        this.pongQueue.clear();
-        this.useState = UseState.IDLE;
-        this.didSwapOffhand = false;
-        this.idleTickCount = 0;
-        this.savedHotbarSlot = -1;
     }
 
     private void startBlink(int duration) {
