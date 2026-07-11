@@ -21,7 +21,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
+import net.minecraft.world.item.Items; // 新增：用于过滤蜘蛛网物品
 import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -59,7 +59,6 @@ import shit.zen.event.EventTarget;
 public class Scaffold extends Module {
     public static Scaffold INSTANCE;
 
-
     public final ModeSetting mode = new ModeSetting("Mode", "Normal", "Telly Bridge", "Old Telly", "Keep Y").withDefault("Normal");
     public final BooleanSetting eagle = new BooleanSetting("Eagle", true, () -> this.mode.is("Normal"));
     public final BooleanSetting sneak = new BooleanSetting("Sneak", true);
@@ -81,6 +80,11 @@ public class Scaffold extends Module {
     private int airTicks = 0;
     private int rotationDelay = 0;
     private final CopyOnWriteArrayList<CopyOnWriteArrayList<Packet<?>>> packetBatches = new CopyOnWriteArrayList<>();
+    private int jitterCounter;
+    private double yawDiff;
+    private double pitchDiff;
+    private double lastYawDiff = Double.NaN;
+    private double lastPitchDiff = Double.NaN;
     private boolean canBuildNow;
 
     public Scaffold() {
@@ -97,6 +101,11 @@ public class Scaffold extends Module {
             this.currentPlacement = null;
             this.targetYLevel = 10000;
             this.velocityDelay = 0;
+            this.jitterCounter = 0;
+            this.yawDiff = 0.0;
+            this.pitchDiff = 0.0;
+            this.lastYawDiff = Double.NaN;
+            this.lastPitchDiff = Double.NaN;
             this.canBuildNow = true;
             this.packetBatches.clear();
             this.packetBatches.add(new CopyOnWriteArrayList<>());
@@ -177,6 +186,7 @@ public class Scaffold extends Module {
         int placeableSlot = -1;
         for (int i = 0; i < 9; i++) {
             ItemStack stack = mc.player.getInventory().getItem(i);
+            // 修改：加入 !stack.is(Items.COBWEB) 过滤掉蜘蛛网
             if (stack.getItem() instanceof BlockItem && BlockUtil.isPlaceable(stack) && !stack.is(Items.COBWEB)) {
                 placeableSlot = i;
                 break;
@@ -199,7 +209,6 @@ public class Scaffold extends Module {
         this.applyRotations();
         boolean firstGroundTick = false;
         this.canBuildNow = true;
-
         if (this.currentPlacement != null && placeableSlot != -1) {
             if (this.groundTicks == 1 && mc.options.keyJump.isDown()) {
                 firstGroundTick = true;
@@ -212,11 +221,9 @@ public class Scaffold extends Module {
                 }
             }
         }
-
         if (mc.player.onGround()) {
             this.canBuildNow = true;
         }
-
         this.correctRotation = this.mode.is("Telly Bridge") && this.canBuildNow
                 ? this.getTargetRotation(firstGroundTick)
                 : this.getPlayerYawRotation();
@@ -250,14 +257,12 @@ public class Scaffold extends Module {
             this.canBuildNow = true;
             ClientBase.delayPackets.clear();
             this.rotationDelay = 0;
-
             if (this.mode.is("Normal") && this.snap.getValue()) {
                 this.rots.setYaw(this.correctRotation.getYaw());
             } else {
                 this.rots.setYaw(RotationUtil.moveTowards((float) this.getBlockDistance(), this.rots.getYaw(), this.correctRotation.getYaw()));
             }
             this.rots.setPitch(this.correctRotation.getPitch());
-
             if (this.sneak.getValue()) {
                 this.eagleTimer++;
                 if (this.eagleTimer == 18) {
@@ -271,34 +276,11 @@ public class Scaffold extends Module {
                     this.eagleTimer = 0;
                 }
             }
-//               if (this.mode.is("Telly Bridge") || this.mode.is("Old Telly")) {
-//
-//                            mc.options.keyJump.setDown(MovementUtil.isMoving() || jumpHeld);
-//
-//                            if (this.airTicks < 1 && MovementUtil.isMoving()) {
-//
-//                                if (this.mode.is("Old Telly")) {
-//
-//                                    this.rots.setYaw(mc.player.getYRot());
-//
-//                                }
-//
-//                                this.lastRots.setYawPitch(this.rots.getYaw(), this.rots.getPitch());
-//
-//                                return;
-//
-//                            }
-//
-//                        }
-
             if (this.mode.is("Telly Bridge") || this.mode.is("Old Telly")) {
                 mc.options.keyJump.setDown(MovementUtil.isMoving() || jumpHeld);
-
                 if (this.airTicks < 1 && MovementUtil.isMoving()) {
                     if (this.mode.is("Old Telly")) {
-                        // 回正时加入平滑曲线，不要一瞬间闪回
-                        float smoothReturn = 50.0f + RandomUtils.nextFloat(0, 15);
-                        this.rots.setYaw(RotationUtil.moveTowards(smoothReturn, this.rots.getYaw(), mc.player.getYRot()));
+                        this.rots.setYaw(mc.player.getYRot());
                     }
                     this.lastRots.setYawPitch(this.rots.getYaw(), this.rots.getPitch());
                     return;
@@ -381,6 +363,7 @@ public class Scaffold extends Module {
         int total = 0;
         for (int i = 0; i < 36; i++) {
             ItemStack stack = mc.player.getInventory().getItem(i);
+            // 修改：计算背包剩余方块总数时同样剔除蜘蛛网
             if (stack.getItem() instanceof BlockItem && BlockUtil.isPlaceable(stack) && !stack.is(Items.COBWEB)) {
                 total += stack.getCount();
             }
@@ -486,6 +469,7 @@ public class Scaffold extends Module {
     private boolean shouldBuild() {
         if (mc.player == null || mc.level == null) return false;
         BlockPos below = BlockPos.containing(mc.player.getX(), mc.player.getY() - 0.5, mc.player.getZ());
+        // 修改：在判断手上拿的物品是否合法时，也加上蜘蛛网检测（防御性代码防止边界情况报错）
         ItemStack mainHand = mc.player.getMainHandItem();
         return mc.level.isEmptyBlock(below) && BlockUtil.isPlaceable(mainHand) && !mainHand.is(Items.COBWEB);
     }
@@ -514,7 +498,6 @@ public class Scaffold extends Module {
                 .iterator().hasNext();
     }
 
-    // 【核心修改】替换原有的转头方法，加入极具欺骗性的无规律扰动曲线
     private Rotation getTargetRotation(boolean firstGround) {
         if (mc.player == null) return null;
         if (!MovementUtil.isInputActive()) return this.getPlayerYawRotation();
@@ -524,18 +507,19 @@ public class Scaffold extends Module {
         Rotation rotation = RotationUtil.rotationFromVec(hitVec);
         double yawDelta = RotationUtil.angleDiffDouble(rotation.getYaw(), RotationHandler.prevRotation.getYaw());
 
-        // 【非规律波动】结合玩家Tick加上微小的随机偏移，打破正弦波的完美周期性
-        float timeFactor = mc.player.tickCount * 0.25f + RandomUtils.nextFloat(0.0f, 0.1f);
-        float humanPitch = 74.5f + (float)(Math.sin(timeFactor) * 1.5) + RandomUtils.nextFloat(-0.5f, 0.5f);
+        // 动态 Pitch 计算，不再死锁 75.5，而是在 73 ~ 78 之间动态游走
+        float humanPitch = 75.0f + (float)(Math.sin(mc.player.tickCount * 0.3) * 2.5);
 
         if (this.groundTicks > 0) {
+            // 在地面上时，视角应该是朝前的（恢复跑酷视角）
             if (!mc.options.keyJump.isDown()) {
                 return new Rotation(mc.player.getYRot(), humanPitch);
             }
             switch (this.groundTicks) {
                 case 1:
                     if (!firstGround) {
-                        float clampLimit = 120.0f + RandomUtils.nextFloat(-10.0f, 10.0f); // 随机化视角拉回速度
+                        // 落地瞬间，模拟人手还没来得及把鼠标完全拉回正前方的状态
+                        float clampLimit = 120.0f; // 允许较大偏角，拉回需要时间
                         rotation.setYaw(RotationHandler.prevRotation.getYaw()
                                 + RotationUtil.clampAngle((float) yawDelta, clampLimit));
                         rotation.setPitch(humanPitch);
@@ -550,24 +534,26 @@ public class Scaffold extends Module {
                     break;
             }
         } else {
+            // 在空中：模拟真人甩鼠标 (阻尼器效果)
+            // 刚起跳时转得最快 (90+)，快到目标时减速 (30)，形成 Easing Out 曲线
             float clampLimit;
             if (this.airTicks == 1) {
-                clampLimit = 110.0f;
+                clampLimit = 110.0f; // 猛甩鼠标
             } else if (this.airTicks == 2) {
-                clampLimit = 60.0f;
+                clampLimit = 60.0f;  // 惯性减弱
             } else {
-                clampLimit = 35.0f;
+                clampLimit = 35.0f;  // 微调对准
             }
 
-            // 【高斯分布误差】比单纯的 nextFloat 更符合人类甩手的正态分布特性
-            clampLimit += (float) (nextGaussian() * 8.0);
+            // 加上人手甩鼠标时随机的力度误差
+            clampLimit += RandomUtils.nextFloat(-5.0f, 15.0f);
 
             rotation.setYaw(RotationHandler.prevRotation.getYaw()
-                    + RotationUtil.clampAngle((float) yawDelta, Math.max(10.0f, clampLimit)));
+                    + RotationUtil.clampAngle((float) yawDelta, clampLimit));
         }
 
         rotation = this.findValidRotation(rotation, firstGround);
-        return this.getSnappedRotation(rotation);
+        return this.getSnappedRotation(rotation); // 传给第一步的 GCD 处理
     }
 
     private Rotation findValidRotation(Rotation rotation, boolean firstGround) {
@@ -584,8 +570,6 @@ public class Scaffold extends Module {
         }
         return RotationUtil.smoothRotation(reference, optimal, maxStep);
     }
-
-    // 【核心修改】引入 Minecraft 原生鼠标灵敏度计算(GCD)，并融合复合噪声
     private Rotation getSnappedRotation(Rotation rotation) {
         if (mc.player == null) return rotation;
         Rotation reference = RotationHandler.prevRotation != null
@@ -594,35 +578,31 @@ public class Scaffold extends Module {
                 ? RotationHandler.targetRotation
                 : new Rotation(mc.player.getYRot(), mc.player.getXRot()));
 
-        // 【复合白噪音】叠加无理数频率，打破规律，像极了真实的手部微小肌颤
+        // 1. 生成基于时间的平滑波动噪声，取代僵硬的 Jitter (模拟手部轻微抖动)
         long time = System.currentTimeMillis();
-        float baseNoiseYaw = (float) (Math.sin(time * 0.0013) + Math.sin(time * 0.0027));
-        float baseNoisePitch = (float) (Math.sin(time * 0.0017) + Math.sin(time * 0.0031));
+        float noiseYaw = (float) (Math.sin(time * 0.005) * 0.6 + Math.cos(time * 0.003) * 0.4);
+        float noisePitch = (float) (Math.cos(time * 0.004) * 0.5 + Math.sin(time * 0.006) * 0.5);
 
-        float randomMicroYaw = RandomUtils.nextFloat(-0.2f, 0.2f);
-        float randomMicroPitch = RandomUtils.nextFloat(-0.2f, 0.2f);
-
-        float noiseYaw = (baseNoiseYaw * 0.4f) + randomMicroYaw;
-        float noisePitch = (baseNoisePitch * 0.4f) + randomMicroPitch;
-
+        // 模拟甩鼠标时的“惯性偏移” (甩得越快，容差越大)
         double deltaYaw = Math.abs(rotation.getYaw() - reference.getYaw());
         if (deltaYaw > 45.0) {
-            // 大幅度甩头时注入高斯正态分布的定位误差
-            noiseYaw += (float) (nextGaussian() * 1.5);
-            noisePitch += (float) (nextGaussian() * 0.8);
+            noiseYaw += RandomUtils.nextFloat(-1.5f, 1.5f); // 甩枪时的误差补偿
+            noisePitch += RandomUtils.nextFloat(-0.8f, 0.8f);
         }
 
         float targetYaw = rotation.getYaw() + noiseYaw;
         float targetPitch = Mth.clamp(rotation.getPitch() + noisePitch, -89.5f, 89.5f);
 
-        // 【GCD 原理】将浮点数夹逼到 Minecraft 的最小鼠标网格上，这是过反作弊的关键
+        // 2. 核心：模拟 Minecraft 真实的鼠标步进 (GCD)
+        // 这是骗过服务端和录像审查的最关键一步
         float sens = mc.options.sensitivity().get().floatValue();
         float f = sens * 0.6F + 0.2F;
-        float gcd = f * f * f * 1.2F;
+        float gcd = f * f * f * 1.2F; // 1.2 是 Minecraft 原生算法 (8.0 * 0.15) 简化得出
 
         float diffYaw = targetYaw - reference.getYaw();
         float diffPitch = targetPitch - reference.getPitch();
 
+        // 将浮点数角度强制对齐到鼠标移动网格上
         int stepsYaw = Math.round(diffYaw / gcd);
         int stepsPitch = Math.round(diffPitch / gcd);
 
@@ -706,10 +686,9 @@ public class Scaffold extends Module {
         return !state.getCollisionShape(mc.level, pos).isEmpty();
     }
 
-    private record PlacementTarget(BlockPos position, Direction facing) {}
-    private record PlacementCandidate(BlockPos pos, Direction direction, int depth) {}
+    private record PlacementTarget(BlockPos position, Direction facing) {
+    }
 
-    private static double nextGaussian() {
-        return java.util.concurrent.ThreadLocalRandom.current().nextGaussian();
+    private record PlacementCandidate(BlockPos pos, Direction direction, int depth) {
     }
 }
