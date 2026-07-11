@@ -12,6 +12,8 @@ import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientboundBlockEventPacket;
+import net.minecraft.network.protocol.game.ClientboundPlayerChatPacket;
+import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -31,8 +33,7 @@ import shit.zen.utils.game.ChunkUtil;
 import shit.zen.utils.render.RenderUtil;
 import shit.zen.event.EventTarget;
 
-public class ChestESP
-extends Module {
+public class ChestESP extends Module {
     private static final float[] chestColor;
     private static final float[] openedChestColor;
     private final List<BlockPos> openedChestPositions = new CopyOnWriteArrayList<>();
@@ -50,10 +51,35 @@ extends Module {
 
     @EventTarget
     public void onPacket(PacketEvent packetEvent) {
-        ClientboundBlockEventPacket clientboundBlockEventPacket;
-        Packet<?> packet;
-        if (packetEvent.isIncoming() && (packet = packetEvent.getPacket()) instanceof ClientboundBlockEventPacket && ((clientboundBlockEventPacket = (ClientboundBlockEventPacket)packet).getBlock() == Blocks.CHEST || clientboundBlockEventPacket.getBlock() == Blocks.TRAPPED_CHEST) && clientboundBlockEventPacket.getB0() == 1 && clientboundBlockEventPacket.getB1() == 1) {
-            this.openedChestPositions.add(clientboundBlockEventPacket.getPos());
+        if (!packetEvent.isIncoming()) {
+            return;
+        }
+
+        Packet<?> packet = packetEvent.getPacket();
+
+        // 🌟 1. 监听方块事件（记录被打开的箱子）
+        if (packet instanceof ClientboundBlockEventPacket blockEventPacket) {
+            if ((blockEventPacket.getBlock() == Blocks.CHEST || blockEventPacket.getBlock() == Blocks.TRAPPED_CHEST)
+                    && blockEventPacket.getB0() == 1
+                    && blockEventPacket.getB1() == 1) {
+                this.openedChestPositions.add(blockEventPacket.getPos());
+            }
+        }
+
+        // 🌟 2. 监听系统聊天广播（服务器提示匹配/开始）
+        if (packet instanceof ClientboundSystemChatPacket chatPacket) {
+            String chatMessage = chatPacket.content().getString();
+            if (chatMessage.contains("匹配") || chatMessage.contains("游戏开始") || chatMessage.contains("START")) {
+                this.openedChestPositions.clear();
+            }
+        }
+
+        // 🌟 3. 兜底：监听普通聊天包（防止有些服务器把开局提示伪装成玩家消息发出来）
+        if (packet instanceof ClientboundPlayerChatPacket playerChatPacket) {
+            String chatMessage = playerChatPacket.body().content();
+            if (chatMessage.contains("匹配") || chatMessage.contains("游戏开始") || chatMessage.contains("START")) {
+                this.openedChestPositions.clear();
+            }
         }
     }
 
@@ -114,7 +140,10 @@ extends Module {
 
     static {
         MODULE_NAME = "ChestESP";
-        chestColor = new float[]{0.0f, 1.0f, 0.0f};
-        openedChestColor = new float[]{1.0f, 0.0f, 0.0f};
+        chestColor = new float[]{0.0f, 1.0f, 0.0f}; // 未开启为绿色
+        openedChestColor = new float[]{1.0f, 0.0f, 0.0f}; // 已开启为红色
     }
 }
+
+
+//chenxx驾到+6

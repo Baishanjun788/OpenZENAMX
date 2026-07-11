@@ -163,8 +163,14 @@ public class NoXZMode extends AntiKBMode {
 
             // 2. 珍珠与弹射物(弓箭)碰撞检测：扫描玩家周围 2.5 格范围内是否存在珍珠或箭矢实体
             AABB detectionBox = mc.player.getBoundingBox().inflate(2.5);
+            // 修改后的检测列表
             boolean projectileNearby = mc.level.getEntitiesOfClass(Entity.class, detectionBox,
-                    entity -> entity instanceof ThrownEnderpearl || entity instanceof Arrow
+                    entity -> entity instanceof ThrownEnderpearl
+                            || entity instanceof Arrow
+                            || entity instanceof net.minecraft.world.entity.projectile.Fireball
+                            || entity instanceof net.minecraft.world.entity.projectile.SmallFireball
+                            || entity instanceof net.minecraft.world.entity.projectile.Snowball
+                            || entity instanceof net.minecraft.world.entity.projectile.ThrownEgg
             ).size() > 0;
 
             if (projectileNearby) {
