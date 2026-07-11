@@ -249,7 +249,8 @@ public class KillAura extends Module {
         this.currentBestHit = null;
         if (aimingTarget != null) {
             this.currentBestHit = RotationUtil.getBestHit(aimingTarget);
-            this.rotation = this.currentBestHit != null ? this.currentBestHit.rotation() : null;
+            // 🌟 修复渲染和模块视角记录，应用 GrimAC 算法
+            this.rotation = this.currentBestHit != null ? this.applyGrimBypass(this.currentBestHit.rotation()) : null;
         } else {
             this.rotation = null;
         }
@@ -344,6 +345,9 @@ public class KillAura extends Module {
 
                 Rotation subRot = subHit.rotation();
                 if (RotationUtil.getHitDistance(entity, mc.player.getEyePosition(), subRot) >= this.aimRange.getValue().floatValue()) continue;
+
+                // 🌟 【核心修改点 1】：在分发静默视角包前，强行将视角进行 GCD 对齐和噪声去重
+                subRot = this.applyGrimBypass(subRot);
 
                 Rotation prevRot = RotationHandler.targetRotation;
                 RotationHandler.targetRotation = subRot;
@@ -456,8 +460,10 @@ public class KillAura extends Module {
         float currentYaw = mc.player.getYRot();
         float currentPitch = mc.player.getXRot();
         if (RotationHandler.targetRotation != null) {
-            mc.player.setYRot(RotationHandler.targetRotation.getYaw());
-            mc.player.setXRot(RotationHandler.targetRotation.getPitch());
+            // 🌟 【核心修改点 2】：双保险，在强行修改玩家实体视角字段前再次进行网格修复和加噪
+            Rotation fixedRot = this.applyGrimBypass(RotationHandler.targetRotation);
+            mc.player.setYRot(fixedRot.getYaw());
+            mc.player.setXRot(fixedRot.getPitch());
         }
 
         int attackKey = mc.options.keyAttack.getKey().getValue();
@@ -469,7 +475,6 @@ public class KillAura extends Module {
         ForgeHooksClient.onMouseButtonPost(attackKey, 1, 0);
 
         // ================= W-TAP 联动核心 =================
-        // 判定 WTap 模块类单例是否存在且处于开启状态，若符合则在砍中人的当下分发命中时序信号
         if (WTap.INSTANCE != null && WTap.INSTANCE.isEnabled()) {
             WTap.INSTANCE.onAttackTarget();
         }
@@ -486,6 +491,45 @@ public class KillAura extends Module {
         if (this.delayMode.is("1.9")) {
             this.sprintCounter = (int) mc.player.getCurrentItemAttackStrengthDelay();
         }
+    }
+
+    // 🌟 【核心修改点 3】：新增内置的绕过算法函数
+    private Rotation applyGrimBypass(Rotation targetRot) {
+        if (targetRot == null || mc.player == null) return targetRot;
+
+        float targetYaw = targetRot.getYaw();
+        float targetPitch = targetRot.getPitch();
+        float currentYaw = mc.player.getYRot();
+        float currentPitch = mc.player.getXRot();
+
+        // 1. 读取客户端当前的真实鼠标灵敏度配置
+        double sensitivity = mc.options.sensitivity().get();
+        double f = sensitivity * 0.6F + 0.2F;
+        double f3 = f * f * f;
+
+        // 2. 还原原版计算公式，推导当前帧的真实鼠标最大公约数 (GCD)
+        double gcd = f3 * 8.0D * 0.15D;
+
+        float yawDiff = targetYaw - currentYaw;
+        float pitchDiff = targetPitch - currentPitch;
+
+        // 3. 注入高频微小离散噪声 (0.01格点抖动)。
+        // 即使多次连击导致目标没动，由于每次的随机噪值不同，网格化取整 (Math.round) 出来的数据也会截然不同，
+        // 这样可以彻底打破相同发包特征，完美破除 ACA 的 equalrotation。
+        yawDiff += (float) ((Math.random() - 0.5) * 0.025);
+        pitchDiff += (float) ((Math.random() - 0.5) * 0.025);
+
+        // 4. 将数学角度代入鼠标移动网格步长，求出真实的步数，并对齐网格
+        int roundedYawSteps = (int) Math.round(yawDiff / gcd);
+        int roundedPitchSteps = (int) Math.round(pitchDiff / gcd);
+
+        float fixedYaw = currentYaw + (float) (roundedYawSteps * gcd);
+        float fixedPitch = currentPitch + (float) (roundedPitchSteps * gcd);
+
+        // 5. 限制抬头低头极限角度
+        fixedPitch = Math.max(-90.0f, Math.min(90.0f, fixedPitch));
+
+        return new Rotation(fixedYaw, fixedPitch);
     }
 
     private boolean isWebPlacing() {
