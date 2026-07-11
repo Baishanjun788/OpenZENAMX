@@ -271,17 +271,31 @@ public class Scaffold extends Module {
                     this.eagleTimer = 0;
                 }
             }
+            //   if (this.mode.is("Telly Bridge") || this.mode.is("Old Telly")) {
+            //
+            //                mc.options.keyJump.setDown(MovementUtil.isMoving() || jumpHeld);
+            //
+            //                if (this.airTicks < 1 && MovementUtil.isMoving()) {
+            //
+            //                    if (this.mode.is("Old Telly")) {
+            //
+            //                        this.rots.setYaw(mc.player.getYRot());
+            //
+            //                    }
+            //
+            //                    this.lastRots.setYawPitch(this.rots.getYaw(), this.rots.getPitch());
+            //
+            //                    return;
+            //
+            //                }
+            //
+            //            }
 
             if (this.mode.is("Telly Bridge") || this.mode.is("Old Telly")) {
                 mc.options.keyJump.setDown(MovementUtil.isMoving() || jumpHeld);
 
-                // 【核心修改】模拟绿玩在 Telly 空中转头时，短暂松开 W 键防止掉入虚空
-                if (this.airTicks >= 1 && this.airTicks <= 4) {
-                    double angleDiff = Math.abs(RotationUtil.angleDiffDouble(this.rots.getYaw(), mc.player.getYRot()));
-                    if (angleDiff > 80.0) {
-                        mc.options.keyUp.setDown(false); // 强制松开前进键
-                    }
-                } else if (MovementUtil.isInputActive()) {
+                // 这里移除了松开 W 键的逻辑，保持原始的移动输入
+                if (MovementUtil.isInputActive()) {
                     mc.options.keyUp.setDown(InputConstants.isKeyDown(mc.getWindow().getWindow(), mc.options.keyUp.getKey().getValue()));
                 }
 
